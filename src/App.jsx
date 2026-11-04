@@ -1,6 +1,7 @@
 import { useMemo, useState } from "react";
 import {
   NavLink,
+  Navigate,
   Routes,
   Route,
   useLocation,
@@ -16,16 +17,18 @@ import {
   Menu,
   Search,
   Bell,
-  ChevronDown,
   ChevronRight,
   Warehouse,
   Plus,
   Download,
   Filter,
-  MoreHorizontal,
   Pencil,
   Eye,
+  EyeOff,
   LogOut,
+  Mail,
+  LockKeyhole,
+  KeyRound,
   ShieldCheck,
   UserRound,
   Clock3,
@@ -35,7 +38,6 @@ import {
   X,
   Save,
   ArrowUpRight,
-  PanelLeftClose,
   Building2,
   History,
   SlidersHorizontal,
@@ -51,12 +53,23 @@ const titleMap = {
   "/calendar": "Attendance calendar",
   "/reports": "Reports",
   "/users": "User management",
+  "/users/new": "Create staff account",
   "/settings": "Settings",
 };
 const fmt = (n) => String(n).padStart(2, "0");
+const demoAdmin = {
+  id: "demo-admin",
+  name: "System Admin",
+  email: "admin@peoplehub.demo",
+  password: "PeopleHub2026!",
+  role: "Admin",
+  godown: null,
+  status: "Active",
+};
 
 function App() {
-  const [role, setRole] = useState("Admin");
+  const [userAccounts, setUserAccounts] = useState([demoAdmin]);
+  const [currentUser, setCurrentUser] = useState(null);
   const [activeGodown, setActiveGodown] = useState("All godowns");
   const [employees, setEmployees] = useState(initialEmployees);
   const [attendance, setAttendance] = useState(initialAttendance);
@@ -67,19 +80,71 @@ function App() {
   const [toast, setToast] = useState("");
   const location = useLocation();
   const navigate = useNavigate();
-  const isAdmin = role === "Admin";
-  const scopedGodown = isAdmin ? activeGodown : "CEMENT";
+  const isAdmin = currentUser?.role === "Admin";
+  const scopedGodown = isAdmin ? activeGodown : currentUser?.godown;
 
-  const visibleEmployees = useMemo(
+  const signIn = (email, password) => {
+    const account = userAccounts.find(
+      (user) =>
+        user.email.toLowerCase() === email.trim().toLowerCase() &&
+        user.password === password &&
+        user.status === "Active",
+    );
+    if (!account) return false;
+    const { password: _password, ...safeAccount } = account;
+    setCurrentUser(safeAccount);
+    setActiveGodown(account.role === "Admin" ? "All godowns" : account.godown);
+    navigate("/", { replace: true });
+    return true;
+  };
+
+  const signOut = () => {
+    setCurrentUser(null);
+    setModal(null);
+    navigate("/login", { replace: true });
+  };
+
+  const createStaffAccount = (details) => {
+    if (!isAdmin) return false;
+    if (
+      userAccounts.some(
+        (account) =>
+          account.email.toLowerCase() === details.email.trim().toLowerCase(),
+      )
+    ) {
+      return false;
+    }
+    setUserAccounts((previous) => [
+      ...previous,
+      {
+        ...details,
+        id: `staff-${Date.now()}`,
+        email: details.email.trim(),
+        role: "Staff",
+        status: "Active",
+      },
+    ]);
+    showToast("Staff account created");
+    navigate("/users");
+    return true;
+  };
+
+  const scopedEmployees = useMemo(
     () =>
       employees.filter(
-        (e) =>
-          (scopedGodown === "All godowns" || e.godown === scopedGodown) &&
-          `${e.name} ${e.phone} ${e.biometricId} ${e.role}`
-            .toLowerCase()
-            .includes(search.toLowerCase()),
+        (employee) =>
+          scopedGodown === "All godowns" || employee.godown === scopedGodown,
       ),
-    [employees, scopedGodown, search],
+    [employees, scopedGodown],
+  );
+  const visibleEmployees = useMemo(
+    () =>
+      scopedEmployees.filter((employee) =>
+        `${employee.name} ${employee.phone} ${employee.biometricId} ${employee.role}`
+          .toLowerCase()
+          .includes(search.toLowerCase()),
+      ),
+    [scopedEmployees, search],
   );
 
   const attendanceRows = useMemo(
@@ -100,16 +165,21 @@ function App() {
   };
 
   const saveEmployee = (data) => {
+    const employeeData = isAdmin
+      ? data
+      : { ...data, godown: scopedGodown };
     if (data.id) {
       setEmployees((prev) =>
-        prev.map((e) => (e.id === data.id ? { ...e, ...data } : e)),
+        prev.map((e) =>
+          e.id === data.id ? { ...e, ...employeeData } : e,
+        ),
       );
       showToast("Employee details updated");
     } else {
       const newId = Math.max(0, ...employees.map((e) => e.id)) + 1;
       setEmployees((prev) => [
         ...prev,
-        { ...data, id: newId, status: "Active" },
+        { ...employeeData, id: newId, status: "Active" },
       ]);
       showToast("Employee added to demo register");
     }
@@ -141,6 +211,10 @@ function App() {
   const openAddEmployee = () => setModal({ type: "employee" });
   const openEditEmployee = (employee) =>
     setModal({ type: "employee", employee });
+
+  if (!currentUser) {
+    return <LoginPage onLogin={signIn} />;
+  }
 
   return (
     <div className="app-shell">
@@ -232,7 +306,7 @@ function App() {
             <div className="section-head">MY GODOWN</div>
             <div className="my-godown">
               <Warehouse size={17} />
-              <span>CEMENT</span>
+              <span>{currentUser.godown}</span>
             </div>
           </div>
         )}
@@ -254,12 +328,19 @@ function App() {
             </p>
           </div>
           <div className="profile-mini">
-            <div className="avatar">{isAdmin ? "AD" : "IT"}</div>
+            <div className="avatar">{initials(currentUser.name)}</div>
             <div className="profile-copy">
-              <strong>{isAdmin ? "System Admin" : "Godown Staff"}</strong>
-              <span>{role} account</span>
+              <strong>{currentUser.name}</strong>
+              <span>{currentUser.role} account</span>
             </div>
-            <MoreHorizontal size={18} />
+            <button
+              className="icon-button profile-signout"
+              onClick={signOut}
+              title="Sign out"
+              aria-label="Sign out"
+            >
+              <LogOut size={17} />
+            </button>
           </div>
         </div>
       </aside>
@@ -279,20 +360,6 @@ function App() {
             </div>
           </div>
           <div className="top-actions">
-            <label className="role-preview">
-              <span>Preview as</span>
-              <select
-                value={role}
-                onChange={(e) => {
-                  setRole(e.target.value);
-                  setActiveGodown("All godowns");
-                }}
-              >
-                <option>Admin</option>
-                <option>Staff</option>
-              </select>
-              <ChevronDown size={14} />
-            </label>
             <button
               className="icon-button notification-button"
               aria-label="Notifications"
@@ -300,7 +367,10 @@ function App() {
               <Bell size={18} />
               <i />
             </button>
-            <div className="top-avatar">{isAdmin ? "AD" : "IT"}</div>
+            <div className="top-avatar">{initials(currentUser.name)}</div>
+            <button className="btn btn-secondary btn-small top-signout" onClick={signOut}>
+              <LogOut size={14} /> Sign out
+            </button>
           </div>
         </header>
 
@@ -310,12 +380,12 @@ function App() {
               path="/"
               element={
                 <Dashboard
-                  employees={employees}
+                  employees={scopedEmployees}
                   attendance={attendance}
                   date={selectedDate}
                   setDate={setSelectedDate}
                   isAdmin={isAdmin}
-                  activeGodown={activeGodown}
+                  activeGodown={scopedGodown}
                   setActiveGodown={setActiveGodown}
                   navigate={navigate}
                   setSearch={setSearch}
@@ -358,6 +428,7 @@ function App() {
                   employees={visibleEmployees}
                   selectedDate={selectedDate}
                   setSelectedDate={setSelectedDate}
+                  navigate={navigate}
                 />
               }
             />
@@ -376,26 +447,41 @@ function App() {
               path="/users"
               element={
                 isAdmin ? (
-                  <UsersPage />
-                ) : (
-                  <Dashboard
-                    employees={employees}
-                    attendance={attendance}
-                    date={selectedDate}
-                    setDate={setSelectedDate}
-                    isAdmin={false}
-                    activeGodown="CEMENT"
-                    setActiveGodown={setActiveGodown}
-                    navigate={navigate}
-                    setSearch={setSearch}
+                  <UsersPage
+                    accounts={userAccounts.map(
+                      ({ password: _password, ...account }) => account,
+                    )}
+                    onCreate={() => navigate("/users/new")}
                   />
+                ) : (
+                  <Navigate to="/" replace />
+                )
+              }
+            />
+            <Route
+              path="/users/new"
+              element={
+                isAdmin ? (
+                  <CreateStaffPage
+                    accounts={userAccounts.map(
+                      ({ password: _password, ...account }) => account,
+                    )}
+                    onCancel={() => navigate("/users")}
+                    onCreate={createStaffAccount}
+                  />
+                ) : (
+                  <Navigate to="/" replace />
                 )
               }
             />
             <Route
               path="/settings"
-              element={<SettingsPage isAdmin={isAdmin} />}
+              element={
+                <SettingsPage isAdmin={isAdmin} activeGodown={scopedGodown} />
+              }
             />
+            <Route path="/login" element={<Navigate to="/" replace />} />
+            <Route path="*" element={<Navigate to="/" replace />} />
           </Routes>
         </div>
         <footer className="footer">
@@ -411,6 +497,7 @@ function App() {
           employee={modal.employee}
           onClose={() => setModal(null)}
           onSave={saveEmployee}
+          isAdmin={isAdmin}
           defaultGodown={
             scopedGodown === "All godowns" ? "CEMENT" : scopedGodown
           }
@@ -423,6 +510,436 @@ function App() {
         </div>
       )}
     </div>
+  );
+}
+
+function LoginPage({ onLogin }) {
+  const [mode, setMode] = useState("login");
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
+  const [showPassword, setShowPassword] = useState(false);
+  const [error, setError] = useState("");
+  const [message, setMessage] = useState("");
+
+  const submitLogin = (event) => {
+    event.preventDefault();
+    setError("");
+    setMessage("");
+    if (!onLogin(email, password)) {
+      setError("Email or password is incorrect. Check your details and try again.");
+    }
+  };
+
+  const submitReset = (event) => {
+    event.preventDefault();
+    setError("");
+    setMessage(
+      "Password reset emails will be available when Firebase Authentication is connected. No email was sent.",
+    );
+  };
+
+  return (
+    <main className="auth-page">
+      <section className="auth-story">
+        <div className="auth-brand">
+          <div className="brand-mark">
+            <Users size={21} />
+          </div>
+          <div>
+            <strong>PeopleHub</strong>
+            <span>PEOPLE & ATTENDANCE</span>
+          </div>
+        </div>
+        <div className="auth-story-copy">
+          <span className="auth-kicker">A CLEARER VIEW OF YOUR PEOPLE</span>
+          <h1>Better people operations start here.</h1>
+          <p>
+            Keep your employee register and daily attendance organized across
+            every godown, all in one place.
+          </p>
+          <div className="auth-benefits">
+            <div>
+              <span className="auth-benefit-icon">
+                <Users size={17} />
+              </span>
+              <span>
+                <strong>One trusted workspace</strong>
+                <small>Employee details, ready when you need them.</small>
+              </span>
+            </div>
+            <div>
+              <span className="auth-benefit-icon">
+                <ShieldCheck size={17} />
+              </span>
+              <span>
+                <strong>Access that fits your role</strong>
+                <small>Company-wide or assigned-godown views.</small>
+              </span>
+            </div>
+          </div>
+        </div>
+        <div className="auth-story-foot">
+          <span>PeopleHub workspace</span>
+          <span>People & attendance, made clearer.</span>
+        </div>
+      </section>
+
+      <section className="auth-panel">
+        <div className="auth-form-wrap">
+          <div className="auth-mobile-brand">
+            <div className="brand-mark">
+              <Users size={20} />
+            </div>
+            <strong>PeopleHub</strong>
+          </div>
+          <div className="auth-heading">
+            <div className="eyebrow">
+              {mode === "login" ? "WELCOME BACK" : "ACCOUNT RECOVERY"}
+            </div>
+            <h2>{mode === "login" ? "Sign in to PeopleHub" : "Forgot your password?"}</h2>
+            <p>
+              {mode === "login"
+                ? "Enter your work account details to continue."
+                : "Enter your account email to request a reset link."}
+            </p>
+          </div>
+
+          {mode === "login" ? (
+            <form className="auth-form" onSubmit={submitLogin}>
+              <div className="auth-field">
+                <label htmlFor="login-email">Email address</label>
+                <span className="auth-input-wrap">
+                  <Mail size={17} />
+                  <input
+                    id="login-email"
+                    type="email"
+                    autoComplete="username"
+                    value={email}
+                    onChange={(event) => setEmail(event.target.value)}
+                    placeholder="you@company.com"
+                    required
+                  />
+                </span>
+              </div>
+              <div className="auth-field">
+                <label htmlFor="login-password">Password</label>
+                <span className="auth-input-wrap">
+                  <LockKeyhole size={17} />
+                  <input
+                    id="login-password"
+                    type={showPassword ? "text" : "password"}
+                    autoComplete="current-password"
+                    value={password}
+                    onChange={(event) => setPassword(event.target.value)}
+                    placeholder="Enter your password"
+                    required
+                  />
+                  <button
+                    className="password-toggle"
+                    type="button"
+                    onClick={() => setShowPassword((shown) => !shown)}
+                    aria-label={showPassword ? "Hide password" : "Show password"}
+                  >
+                    {showPassword ? <EyeOff size={17} /> : <Eye size={17} />}
+                  </button>
+                </span>
+              </div>
+              <div className="auth-form-options">
+                <span className="auth-secure-note">
+                  <ShieldCheck size={14} /> Private workspace
+                </span>
+                <button
+                  className="auth-link"
+                  type="button"
+                  onClick={() => {
+                    setMode("reset");
+                    setError("");
+                    setMessage("");
+                  }}
+                >
+                  Forgot password?
+                </button>
+              </div>
+              {error && (
+                <div className="auth-feedback error" role="alert">
+                  {error}
+                </div>
+              )}
+              <button className="btn btn-primary auth-submit" type="submit">
+                Sign in <ArrowUpRight size={16} />
+              </button>
+              <div className="demo-access">
+                <div className="demo-access-top">
+                  <span className="demo-access-icon">
+                    <KeyRound size={15} />
+                  </span>
+                  <strong>Prototype demo access</strong>
+                  <span className="demo-label">DEMO</span>
+                </div>
+                <p>
+                  <span>admin@peoplehub.demo</span>
+                  <span>PeopleHub2026!</span>
+                </p>
+                <button
+                  type="button"
+                  className="auth-link demo-fill"
+                  onClick={() => {
+                    setEmail("admin@peoplehub.demo");
+                    setPassword("PeopleHub2026!");
+                    setError("");
+                  }}
+                >
+                  Fill demo credentials
+                </button>
+              </div>
+            </form>
+          ) : (
+            <form className="auth-form" onSubmit={submitReset}>
+              <div className="auth-field">
+                <label htmlFor="reset-email">Email address</label>
+                <span className="auth-input-wrap">
+                  <Mail size={17} />
+                  <input
+                    id="reset-email"
+                    type="email"
+                    autoComplete="email"
+                    value={email}
+                    onChange={(event) => setEmail(event.target.value)}
+                    placeholder="you@company.com"
+                    required
+                  />
+                </span>
+              </div>
+              {error && (
+                <div className="auth-feedback error" role="alert">
+                  {error}
+                </div>
+              )}
+              {message && (
+                <div className="auth-feedback info" role="status">
+                  {message}
+                </div>
+              )}
+              <button className="btn btn-primary auth-submit" type="submit">
+                Request reset link <ArrowUpRight size={16} />
+              </button>
+              <button
+                type="button"
+                className="auth-back"
+                onClick={() => {
+                  setMode("login");
+                  setError("");
+                  setMessage("");
+                }}
+              >
+                <ChevronRight className="flip" size={15} /> Back to sign in
+              </button>
+            </form>
+          )}
+
+          <p className="auth-prototype-note">
+            UI prototype only. Authentication, password recovery, and access
+            enforcement will be connected to Firebase.
+          </p>
+        </div>
+      </section>
+    </main>
+  );
+}
+
+function CreateStaffPage({ accounts, onCancel, onCreate }) {
+  const [name, setName] = useState("");
+  const [email, setEmail] = useState("");
+  const [godown, setGodown] = useState(godowns[0]);
+  const [password, setPassword] = useState("");
+  const [confirmPassword, setConfirmPassword] = useState("");
+  const [showPassword, setShowPassword] = useState(false);
+  const [showConfirmPassword, setShowConfirmPassword] = useState(false);
+  const [errors, setErrors] = useState({});
+
+  const submit = (event) => {
+    event.preventDefault();
+    const nextErrors = {};
+    if (!name.trim()) nextErrors.name = "Enter the staff member's name.";
+    if (
+      accounts.some(
+        (account) => account.email.toLowerCase() === email.trim().toLowerCase(),
+      )
+    ) {
+      nextErrors.email = "An account with this email already exists.";
+    }
+    if (password.length < 8) {
+      nextErrors.password = "Use a password with at least 8 characters.";
+    }
+    if (password !== confirmPassword) {
+      nextErrors.confirmPassword = "Passwords do not match.";
+    }
+    setErrors(nextErrors);
+    if (Object.keys(nextErrors).length > 0) return;
+
+    const created = onCreate({
+      name: name.trim(),
+      email: email.trim(),
+      password,
+      godown,
+    });
+    if (!created) {
+      setErrors({ email: "An account with this email already exists." });
+    }
+  };
+
+  return (
+    <>
+      <PageHeading
+        eyebrow="NEW STAFF ACCOUNT"
+        title="Create a staff account"
+        subtitle="Set up sign-in details and assign this staff member to one godown."
+        action={
+          <button className="btn btn-secondary" onClick={onCancel}>
+            Cancel
+          </button>
+        }
+      />
+      <form className="panel staff-registration" onSubmit={submit}>
+        <div className="registration-section-heading">
+          <div className="settings-icon">
+            <UserRound size={19} />
+          </div>
+          <div>
+            <h2>Staff details</h2>
+            <p>These details will be used to sign in to PeopleHub.</p>
+          </div>
+        </div>
+        <div className="registration-fields">
+          <div className={`auth-field ${errors.name ? "has-error" : ""}`}>
+            <label htmlFor="staff-name">Full name</label>
+            <input
+              id="staff-name"
+              type="text"
+              autoComplete="name"
+              value={name}
+              onChange={(event) => setName(event.target.value)}
+              placeholder="Enter their full name"
+              required
+            />
+            {errors.name && <small>{errors.name}</small>}
+          </div>
+          <div className={`auth-field ${errors.email ? "has-error" : ""}`}>
+            <label htmlFor="staff-email">Work email</label>
+            <input
+              id="staff-email"
+              type="email"
+              autoComplete="email"
+              value={email}
+              onChange={(event) => setEmail(event.target.value)}
+              placeholder="staff@company.com"
+              required
+            />
+            {errors.email && <small>{errors.email}</small>}
+          </div>
+          <div className="registration-access">
+            <div>
+              <span className="registration-field-label">Account role</span>
+              <span className="role-badge staff-role">Staff</span>
+              <small>Only Admin can assign roles or create accounts.</small>
+            </div>
+            <div className="auth-field">
+              <label htmlFor="staff-godown">Assigned godown</label>
+              <select
+                id="staff-godown"
+                value={godown}
+                onChange={(event) => setGodown(event.target.value)}
+                required
+              >
+                {godowns.map((name) => (
+                  <option key={name}>{name}</option>
+                ))}
+              </select>
+              <small>This account will only see this godown.</small>
+            </div>
+          </div>
+          <div className="registration-passwords">
+            <div
+              className={`auth-field ${errors.password ? "has-error" : ""}`}
+            >
+              <label htmlFor="staff-password">Temporary password</label>
+              <span className="auth-input-wrap">
+                <LockKeyhole size={17} />
+                <input
+                  id="staff-password"
+                  type={showPassword ? "text" : "password"}
+                  autoComplete="new-password"
+                  value={password}
+                  onChange={(event) => setPassword(event.target.value)}
+                  placeholder="At least 8 characters"
+                  minLength={8}
+                  required
+                />
+                <button
+                  className="password-toggle"
+                  type="button"
+                  onClick={() => setShowPassword((shown) => !shown)}
+                  aria-label={showPassword ? "Hide password" : "Show password"}
+                >
+                  {showPassword ? <EyeOff size={17} /> : <Eye size={17} />}
+                </button>
+              </span>
+              {errors.password && <small>{errors.password}</small>}
+            </div>
+            <div
+              className={`auth-field ${errors.confirmPassword ? "has-error" : ""}`}
+            >
+              <label htmlFor="staff-confirm-password">
+                Confirm password
+              </label>
+              <span className="auth-input-wrap">
+                <LockKeyhole size={17} />
+                <input
+                  id="staff-confirm-password"
+                  type={showConfirmPassword ? "text" : "password"}
+                  autoComplete="new-password"
+                  value={confirmPassword}
+                  onChange={(event) => setConfirmPassword(event.target.value)}
+                  placeholder="Enter password again"
+                  required
+                />
+                <button
+                  className="password-toggle"
+                  type="button"
+                  onClick={() => setShowConfirmPassword((shown) => !shown)}
+                  aria-label={
+                    showConfirmPassword ? "Hide password" : "Show password"
+                  }
+                >
+                  {showConfirmPassword ? (
+                    <EyeOff size={17} />
+                  ) : (
+                    <Eye size={17} />
+                  )}
+                </button>
+              </span>
+              {errors.confirmPassword && <small>{errors.confirmPassword}</small>}
+            </div>
+          </div>
+        </div>
+        <div className="registration-notice">
+          <ShieldCheck size={16} />
+          <span>
+            This prototype keeps new accounts in memory only. Firebase
+            Authentication and Firestore will handle account creation and
+            godown permissions in the connected app.
+          </span>
+        </div>
+        <div className="registration-actions">
+          <button type="button" className="btn btn-secondary" onClick={onCancel}>
+            Cancel
+          </button>
+          <button type="submit" className="btn btn-primary">
+            <Plus size={16} /> Create staff account
+          </button>
+        </div>
+      </form>
+    </>
   );
 }
 
@@ -480,7 +997,7 @@ function Dashboard({
 }) {
   const scoped = employees.filter(
     (e) =>
-      !isAdmin || activeGodown === "All godowns" || e.godown === activeGodown,
+      (isAdmin && activeGodown === "All godowns") || e.godown === activeGodown,
   );
   const todayRows = scoped.map(
     (e) =>
@@ -937,6 +1454,7 @@ function CalendarPage({
   employees,
   selectedDate,
   setSelectedDate,
+  navigate,
 }) {
   const [month, setMonth] = useState(new Date(2026, 10, 1));
   const year = month.getFullYear(),
@@ -1050,7 +1568,7 @@ function CalendarPage({
           </div>
           <button
             className="btn btn-primary full-width"
-            onClick={() => window.location.assign("/attendance")}
+            onClick={() => navigate("/attendance")}
           >
             Open daily attendance <ArrowUpRight size={15} />
           </button>
@@ -1177,36 +1695,28 @@ function Reports({ employees, attendance, isAdmin, activeGodown }) {
   );
 }
 
-function UsersPage() {
+function UsersPage({ accounts, onCreate }) {
   return (
     <>
       <PageHeading
         eyebrow="ACCESS CONTROL"
         title="User management"
-        subtitle="A preview of how Admin and Staff accounts will be managed."
+        subtitle="Create staff accounts and assign each person to their godown."
         action={
-          <button
-            className="btn btn-primary"
-            onClick={() =>
-              alert(
-                "User creation will be connected after database and authentication setup.",
-              )
-            }
-          >
-            <Plus size={16} /> Add user
+          <button className="btn btn-primary" onClick={onCreate}>
+            <Plus size={16} /> Create staff account
           </button>
         }
       />
       <div className="notice-strip">
         <div className="notice-symbol">
-          <ShieldCheck size={17} />
+          <LockKeyhole size={17} />
         </div>
         <div>
-          <strong>Access rules will be enforced by the backend</strong>
+          <strong>Only Admin can create accounts</strong>
           <span>
-            This page is a UI preview. Hiding screens is not a security
-            boundary; server-side permissions will be implemented when we
-            connect the database.
+            Staff accounts have access to one assigned godown. Account data in
+            this UI prototype resets when the page is refreshed.
           </span>
         </div>
       </div>
@@ -1219,56 +1729,37 @@ function UsersPage() {
                 <th>ACCOUNT ROLE</th>
                 <th>ASSIGNED GODOWN</th>
                 <th>STATUS</th>
-                <th></th>
               </tr>
             </thead>
             <tbody>
-              <tr>
-                <td>
-                  <div className="employee-cell">
-                    <div className="avatar small">AD</div>
-                    <div>
-                      <strong>System Admin</strong>
-                      <span>admin@example.com</span>
+              {accounts.map((account) => (
+                <tr key={account.id}>
+                  <td>
+                    <div className="employee-cell">
+                      <div className="avatar small">
+                        {initials(account.name)}
+                      </div>
+                      <div>
+                        <strong>{account.name}</strong>
+                        <span>{account.email}</span>
+                      </div>
                     </div>
-                  </div>
-                </td>
-                <td>
-                  <span className="role-badge admin-role">Admin</span>
-                </td>
-                <td>All godowns</td>
-                <td>
-                  <span className="status-badge active-status">Active</span>
-                </td>
-                <td>
-                  <button className="icon-button">
-                    <MoreHorizontal size={17} />
-                  </button>
-                </td>
-              </tr>
-              <tr>
-                <td>
-                  <div className="employee-cell">
-                    <div className="avatar small">BK</div>
-                    <div>
-                      <strong>Brian Kiptoo</strong>
-                      <span>brian@example.com</span>
-                    </div>
-                  </div>
-                </td>
-                <td>
-                  <span className="role-badge staff-role">Staff</span>
-                </td>
-                <td>CEMENT</td>
-                <td>
-                  <span className="status-badge active-status">Active</span>
-                </td>
-                <td>
-                  <button className="icon-button">
-                    <MoreHorizontal size={17} />
-                  </button>
-                </td>
-              </tr>
+                  </td>
+                  <td>
+                    <span
+                      className={`role-badge ${account.role === "Admin" ? "admin-role" : "staff-role"}`}
+                    >
+                      {account.role}
+                    </span>
+                  </td>
+                  <td>{account.role === "Admin" ? "All godowns" : account.godown}</td>
+                  <td>
+                    <span className="status-badge active-status">
+                      {account.status}
+                    </span>
+                  </td>
+                </tr>
+              ))}
             </tbody>
           </table>
         </div>
@@ -1277,7 +1768,7 @@ function UsersPage() {
   );
 }
 
-function SettingsPage({ isAdmin }) {
+function SettingsPage({ isAdmin, activeGodown }) {
   return (
     <>
       <PageHeading
@@ -1302,10 +1793,10 @@ function SettingsPage({ isAdmin }) {
           <p>
             {isAdmin
               ? "You are previewing the Admin experience."
-              : "You are previewing the Staff experience for CEMENT."}
+              : `Your Staff account is assigned to ${activeGodown}.`}
           </p>
           <span className="settings-meta">
-            Role preview only — authentication comes later
+            {isAdmin ? "Admin · all godowns" : `Staff · ${activeGodown}`}
           </span>
         </div>
         <div className="panel settings-card">
@@ -1323,7 +1814,13 @@ function SettingsPage({ isAdmin }) {
   );
 }
 
-function EmployeeModal({ employee, onClose, onSave, defaultGodown }) {
+function EmployeeModal({
+  employee,
+  onClose,
+  onSave,
+  defaultGodown,
+  isAdmin,
+}) {
   const [form, setForm] = useState(
     employee || {
       name: "",
@@ -1398,18 +1895,25 @@ function EmployeeModal({ employee, onClose, onSave, defaultGodown }) {
           </label>
           <label>
             Godown
-            <select
-              value={form.godown}
-              onChange={(e) => update("godown", e.target.value)}
-            >
-              {godowns.map((g) => (
-                <option key={g}>{g}</option>
-              ))}
-            </select>
-            <span className="field-hint">
-              In the live app, Staff accounts will be restricted to their
-              assigned godown.
-            </span>
+            {isAdmin ? (
+              <select
+                value={form.godown}
+                onChange={(e) => update("godown", e.target.value)}
+              >
+                {godowns.map((g) => (
+                  <option key={g}>{g}</option>
+                ))}
+              </select>
+            ) : (
+              <div className="fixed-godown">
+                <Warehouse size={15} /> {form.godown}
+              </div>
+            )}
+            {!isAdmin && (
+              <span className="field-hint">
+                Your account can only manage records in this godown.
+              </span>
+            )}
           </label>
           <label>
             Employment status
