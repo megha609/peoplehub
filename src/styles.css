@@ -445,6 +445,12 @@ select:focus-visible {
   transform: translateY(-1px);
 }
 
+.btn:disabled {
+  cursor: wait;
+  opacity: 0.65;
+  transform: none;
+}
+
 .btn-primary {
   background: linear-gradient(115deg, #18876e, #11765f);
   color: #fff;
@@ -566,6 +572,10 @@ select:focus-visible {
   grid-template-columns: repeat(5, minmax(0, 1fr));
   gap: 13px;
   margin-bottom: 23px;
+}
+
+.dashboard-stats {
+  grid-template-columns: repeat(6, minmax(0, 1fr));
 }
 
 .stat-card {
@@ -990,6 +1000,11 @@ tbody tr:hover {
   background: #f1edfa;
 }
 
+.overtime {
+  color: #527a9c;
+  background: #e9f0f7;
+}
+
 .not-marked {
   color: #728078;
   background: #eff3f0;
@@ -1003,6 +1018,22 @@ tbody tr:hover {
 .staff-role {
   color: #557195;
   background: #edf2f8;
+}
+
+.inactive-status {
+  color: #a3483e;
+  background: #fff0ed;
+}
+
+.staff-godown-select {
+  min-height: 32px;
+  max-width: 230px;
+  padding: 5px 26px 5px 9px;
+  border: 1px solid #dce8e2;
+  border-radius: 7px;
+  background: #fff;
+  color: #50665e;
+  font-size: 10px;
 }
 
 .row-action {
@@ -1025,6 +1056,25 @@ tbody tr:hover {
   text-align: center;
   padding: 32px 16px;
   color: #899a93;
+}
+
+.employee-load-error {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+}
+
+.employee-load-error-banner {
+  justify-content: space-between;
+  margin-bottom: 18px;
+  padding: 11px 12px;
+  border: 1px solid #f0d0ca;
+  border-radius: 8px;
+  background: #fff5f2;
+  color: #a3483e;
+  font-size: 10px;
+  line-height: 1.55;
 }
 
 .attendance-controls {
@@ -1089,6 +1139,10 @@ tbody tr:hover {
   background: #9177c7;
 }
 
+.mini-dot.overtime {
+  background: #527a9c;
+}
+
 .attendance-select {
   min-width: 128px;
   height: 31px;
@@ -1119,6 +1173,11 @@ tbody tr:hover {
 .attendance-select.on-leave {
   border-color: #ddd4f0;
   background: #f8f5fd;
+}
+
+.attendance-select.overtime {
+  border-color: #cbdceb;
+  background: #f2f7fb;
 }
 
 .audit-note {
@@ -1556,6 +1615,10 @@ tbody tr:hover {
   }
 
   .stats-grid {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+
+  .dashboard-stats {
     grid-template-columns: repeat(3, minmax(0, 1fr));
   }
 }
