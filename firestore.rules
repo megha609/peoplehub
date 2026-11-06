@@ -1,0 +1,300 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+    function signedIn() {
+      return request.auth != null;
+    }
+
+    function userExists() {
+      return signedIn() &&
+        exists(/databases/$(database)/documents/users/$(request.auth.uid));
+    }
+
+    function userProfile() {
+      return get(
+        /databases/$(database)/documents/users/$(request.auth.uid)
+      ).data;
+    }
+
+    function activeUser() {
+      return userExists() && userProfile().active == true;
+    }
+
+    function isAdmin() {
+      return activeUser() && userProfile().role == "Admin";
+    }
+
+    function isStaff() {
+      return activeUser() && userProfile().role == "Staff";
+    }
+
+    function validGodown(godown) {
+      return godown in [
+        "CEMENT",
+        "PAINTS",
+        "HARDWARE",
+        "STEEL",
+        "ROOFING SHEETS",
+        "TILE & SANITARY",
+        "TILE2, SANITARY & TIMBER (LOCAL)",
+        "TILE2, SANITARY & TIMBER (IMPORTED)",
+        "TIMBER WORKSHOP"
+      ];
+    }
+
+    function canAccessGodown(godown) {
+      return isAdmin() ||
+        (isStaff() && userProfile().godown == godown);
+    }
+
+    function canWriteGodown(godown) {
+      return validGodown(godown) &&
+        (
+          isAdmin() ||
+          (isStaff() && userProfile().godown == godown)
+        );
+    }
+
+    function validEmployee(employeeData) {
+      return employeeData.keys().hasAll([
+          'name', 'role', 'godown', 'status',
+          'createdAt', 'updatedAt'
+        ])
+        && employeeData.keys().hasOnly([
+          'name', 'role', 'godown', 'status',
+          'createdAt', 'updatedAt'
+        ])
+        && employeeData.name is string
+        && employeeData.name.size() > 0
+        && employeeData.role is string
+        && employeeData.role.size() > 0
+        && validGodown(employeeData.godown)
+        && employeeData.status in ['Active', 'Inactive']
+        && employeeData.createdAt is timestamp
+        && employeeData.updatedAt is timestamp;
+    }
+
+    function validStatus(status) {
+      return status in [
+        "Present",
+        "Absent",
+        "Sick",
+        "On Leave",
+        "Overtime"
+      ];
+    }
+
+    function validAttendanceDate(date) {
+      return date is string
+        && date.matches("^[0-9]{4}-[0-9]{2}-[0-9]{2}$");
+    }
+
+    function hasAttendanceFields(data) {
+      return data.keys().hasAll([
+          "employeeId",
+          "employeeName",
+          "role",
+          "godown",
+          "date",
+          "status",
+          "updatedBy",
+          "updatedByUid",
+          "updatedAt"
+        ])
+        && data.employeeId is string
+        && data.employeeName is string
+        && data.role is string
+        && data.godown is string
+        && validAttendanceDate(data.date)
+        && validStatus(data.status)
+        && data.updatedBy is string
+        && data.updatedByUid == request.auth.uid
+        && data.updatedAt == request.time;
+    }
+
+    function activeEmployeeInGodown(
+      employeeId,
+      employeeName,
+      role,
+      godown
+    ) {
+      let employeePath =
+        /databases/$(database)/documents/employees/$(employeeId);
+
+      return exists(employeePath)
+        && get(employeePath).data.status == "Active"
+        && get(employeePath).data.godown == godown
+        && get(employeePath).data.name == employeeName
+        && get(employeePath).data.role == role;
+    }
+
+    function creatorUnchanged() {
+      return resource.data.keys().hasAny(["createdByUid"])
+        ? request.resource.data.keys().hasAny(["createdByUid"])
+          && request.resource.data.createdByUid == resource.data.createdByUid
+        : !request.resource.data.keys().hasAny(["createdByUid"]);
+    }
+
+    function correctionHasAudit(attendanceId) {
+      let auditId = request.resource.data.lastAuditId;
+      let auditPath =
+        /databases/$(database)/documents/attendanceAudit/$(auditId);
+
+      return auditId is string
+        && !exists(auditPath)
+        && existsAfter(auditPath)
+        && getAfter(auditPath).data.attendanceId == attendanceId
+        && getAfter(auditPath).data.previousStatus == resource.data.status
+        && getAfter(auditPath).data.newStatus == request.resource.data.status
+        && getAfter(auditPath).data.employeeId == request.resource.data.employeeId
+        && getAfter(auditPath).data.employeeName == request.resource.data.employeeName
+        && getAfter(auditPath).data.godown == request.resource.data.godown
+        && getAfter(auditPath).data.date == request.resource.data.date
+        && getAfter(auditPath).data.changedBy == request.resource.data.updatedBy
+        && getAfter(auditPath).data.changedByUid == request.auth.uid
+        && getAfter(auditPath).data.changedAt == request.time;
+    }
+
+    function auditHasCorrection(auditId) {
+      let attendanceId = request.resource.data.attendanceId;
+      let attendancePath =
+        /databases/$(database)/documents/attendance/$(attendanceId);
+
+      return attendanceId is string
+        && exists(attendancePath)
+        && existsAfter(attendancePath)
+        && get(attendancePath).data.status == request.resource.data.previousStatus
+        && getAfter(attendancePath).data.status == request.resource.data.newStatus
+        && getAfter(attendancePath).data.lastAuditId == auditId
+        && getAfter(attendancePath).data.employeeId == request.resource.data.employeeId
+        && getAfter(attendancePath).data.employeeName == request.resource.data.employeeName
+        && getAfter(attendancePath).data.godown == request.resource.data.godown
+        && getAfter(attendancePath).data.date == request.resource.data.date
+        && getAfter(attendancePath).data.updatedBy == request.resource.data.changedBy
+        && getAfter(attendancePath).data.updatedByUid == request.auth.uid
+        && getAfter(attendancePath).data.updatedAt == request.time;
+    }
+
+    match /users/{userId} {
+      allow get: if signedIn() &&
+        (request.auth.uid == userId || isAdmin());
+
+      allow list, create, update, delete: if isAdmin();
+    }
+
+    match /employees/{employeeId} {
+      allow read: if activeUser() &&
+        canAccessGodown(resource.data.godown);
+
+      allow create: if isAdmin() &&
+        validEmployee(request.resource.data);
+
+      allow update: if isAdmin()
+        && validEmployee(request.resource.data)
+        && request.resource.data.createdAt == resource.data.createdAt;
+
+      allow delete: if false;
+    }
+
+    match /attendance/{attendanceId} {
+      allow get, list: if activeUser() &&
+        canAccessGodown(resource.data.godown);
+
+      allow create: if signedIn()
+        && request.resource.data.keys().hasOnly([
+          "employeeId",
+          "employeeName",
+          "role",
+          "godown",
+          "date",
+          "status",
+          "updatedBy",
+          "updatedByUid",
+          "updatedAt",
+          "createdByUid"
+        ])
+        && hasAttendanceFields(request.resource.data)
+        && request.resource.data.keys().hasAll(["createdByUid"])
+        && request.resource.data.createdByUid == request.auth.uid
+        && canWriteGodown(request.resource.data.godown)
+        && activeEmployeeInGodown(
+          request.resource.data.employeeId,
+          request.resource.data.employeeName,
+          request.resource.data.role,
+          request.resource.data.godown
+        );
+
+      allow update: if signedIn()
+        && hasAttendanceFields(request.resource.data)
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+          "status",
+          "updatedBy",
+          "updatedByUid",
+          "updatedAt",
+          "lastAuditId"
+        ])
+        && request.resource.data.status != resource.data.status
+        && request.resource.data.employeeId == resource.data.employeeId
+        && request.resource.data.employeeName == resource.data.employeeName
+        && request.resource.data.role == resource.data.role
+        && request.resource.data.godown == resource.data.godown
+        && request.resource.data.date == resource.data.date
+        && creatorUnchanged()
+        && canWriteGodown(resource.data.godown)
+        && correctionHasAudit(attendanceId);
+
+      allow delete: if false;
+    }
+
+    match /attendanceAudit/{auditId} {
+      allow get, list: if activeUser() &&
+        canAccessGodown(resource.data.godown);
+
+      allow create: if signedIn()
+        && request.resource.data.keys().hasOnly([
+          "attendanceId",
+          "previousStatus",
+          "newStatus",
+          "employeeId",
+          "employeeName",
+          "godown",
+          "date",
+          "changedBy",
+          "changedByUid",
+          "changedAt"
+        ])
+        && request.resource.data.keys().hasAll([
+          "attendanceId",
+          "previousStatus",
+          "newStatus",
+          "employeeId",
+          "employeeName",
+          "godown",
+          "date",
+          "changedBy",
+          "changedByUid",
+          "changedAt"
+        ])
+        && validStatus(request.resource.data.previousStatus)
+        && validStatus(request.resource.data.newStatus)
+        && request.resource.data.previousStatus != request.resource.data.newStatus
+        && request.resource.data.attendanceId is string
+        && request.resource.data.employeeId is string
+        && request.resource.data.employeeName is string
+        && request.resource.data.godown is string
+        && validAttendanceDate(request.resource.data.date)
+        && request.resource.data.changedBy is string
+        && request.resource.data.changedByUid == request.auth.uid
+        && request.resource.data.changedAt == request.time
+        && canWriteGodown(request.resource.data.godown)
+        && auditHasCorrection(auditId);
+
+      allow update, delete: if false;
+    }
+
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}

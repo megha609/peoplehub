@@ -933,28 +933,21 @@ function App() {
           return { changed: false, corrected: false };
         }
 
-        const recordData = {
-          ...newRecordData,
-          employeeName:
-            typeof existingData.employeeName === "string"
-              ? existingData.employeeName
-              : employee.name,
-          role:
-            typeof existingData.role === "string"
-              ? existingData.role
-              : employee.role,
-          godown: godowns.includes(existingData.godown)
-            ? existingData.godown
-            : employee.godown,
-        };
-        transaction.update(existingRecord.ref, recordData);
+        transaction.update(existingRecord.ref, {
+          status,
+          updatedBy,
+          updatedByUid,
+          updatedAt: serverTimestamp(),
+          lastAuditId: auditRef.id,
+        });
         transaction.set(auditRef, {
           previousStatus,
           newStatus: status,
-          employeeId: normalizedEmployeeId,
-          employeeName: recordData.employeeName,
-          godown: recordData.godown,
-          date: selectedDate,
+          attendanceId: existingRecord.id,
+          employeeId: existingData.employeeId,
+          employeeName: existingData.employeeName,
+          godown: existingData.godown,
+          date: existingData.date,
           changedBy: updatedBy,
           changedByUid: updatedByUid,
           changedAt: serverTimestamp(),
