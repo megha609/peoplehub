@@ -2,6 +2,10 @@ rules_version = '2';
 
 service cloud.firestore {
   match /databases/{database}/documents {
+    function protectedSuperAdminUids() {
+      return ["Pinc0L99DjUKZ0eYA1IzJB2GKPd2"];
+    }
+
     function signedIn() {
       return request.auth != null;
     }
@@ -21,8 +25,15 @@ service cloud.firestore {
       return userExists() && userProfile().active == true;
     }
 
+    function isSuperAdmin() {
+      return activeUser()
+        && request.auth.uid in protectedSuperAdminUids()
+        && userProfile().role == "SuperAdmin";
+    }
+
     function isAdmin() {
-      return activeUser() && userProfile().role == "Admin";
+      return activeUser() &&
+        (isSuperAdmin() || userProfile().role == "Admin");
     }
 
     function isStaff() {
@@ -41,6 +52,16 @@ service cloud.firestore {
         "TILE2, SANITARY & TIMBER (IMPORTED)",
         "TIMBER WORKSHOP"
       ];
+    }
+
+    function validAccountAccess(data) {
+      return data.keys().hasAll(["role", "active", "godown"])
+        && data.role in ["Admin", "Staff"]
+        && data.active is bool
+        && (
+          (data.role == "Admin" && data.godown == null)
+          || (data.role == "Staff" && validGodown(data.godown))
+        );
     }
 
     function canAccessGodown(godown) {
@@ -178,9 +199,40 @@ service cloud.firestore {
 
     match /users/{userId} {
       allow get: if signedIn() &&
-        (request.auth.uid == userId || isAdmin());
+        (request.auth.uid == userId || isSuperAdmin());
 
-      allow list, create, update, delete: if isAdmin();
+      allow list: if isSuperAdmin();
+
+      allow create: if isSuperAdmin()
+        && !(userId in protectedSuperAdminUids())
+        && validAccountAccess(request.resource.data)
+        && request.resource.data.keys().hasAll([
+          "email",
+          "createdAt"
+        ])
+        && request.resource.data.keys().hasOnly([
+          "role",
+          "active",
+          "godown",
+          "email",
+          "createdAt"
+        ])
+        && request.resource.data.email is string
+        && request.resource.data.createdAt == request.time;
+
+      allow update: if isSuperAdmin()
+        && !(userId in protectedSuperAdminUids())
+        && userId != request.auth.uid
+        && validAccountAccess(request.resource.data)
+        && request.resource.data.email == resource.data.email
+        && request.resource.data.createdAt == resource.data.createdAt
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+          "role",
+          "godown",
+          "active"
+        ]);
+
+      allow delete: if false;
     }
 
     match /employees/{employeeId} {

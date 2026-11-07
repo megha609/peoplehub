@@ -58,6 +58,7 @@ import {
   getDocs,
   getDocsFromServer,
   limit,
+  onSnapshot,
   orderBy,
   query,
   runTransaction,
@@ -71,6 +72,7 @@ import { auth, db, staffAccountAuth } from "./firebase";
 
 const fmt = (n) => String(n).padStart(2, "0");
 const today = getLocalDateString();
+const SUPER_ADMIN_UIDS = ["Pinc0L99DjUKZ0eYA1IzJB2GKPd2"];
 const statuses = ["Present", "Absent", "Sick", "On Leave", "Overtime"];
 const attendancePageSize = 50;
 const titleMap = {
@@ -97,8 +99,15 @@ function App() {
   const [employeesLoading, setEmployeesLoading] = useState(true);
   const [employeesError, setEmployeesError] = useState("");
   const [attendance, setAttendance] = useState([]);
+  const [calendarDataScopeKey, setCalendarDataScopeKey] = useState("");
+  const [calendarDataQueryKey, setCalendarDataQueryKey] = useState("");
+  const [calendarErrorQueryKey, setCalendarErrorQueryKey] = useState("");
   const [reportAttendance, setReportAttendance] = useState([]);
+  const [reportDataScopeKey, setReportDataScopeKey] = useState("");
+  const [reportDataQueryKey, setReportDataQueryKey] = useState("");
+  const [reportErrorQueryKey, setReportErrorQueryKey] = useState("");
   const [dailyAttendance, setDailyAttendance] = useState([]);
+  const [dailyDataKey, setDailyDataKey] = useState("");
   const [attendanceLoading, setAttendanceLoading] = useState(false);
   const [reportAttendanceLoading, setReportAttendanceLoading] = useState(false);
   const [reportAttendanceError, setReportAttendanceError] = useState("");
@@ -126,8 +135,66 @@ function App() {
   const reportAttendanceRequestId = useRef(0);
   const reportAttendanceCursor = useRef(null);
   const dailyAttendanceRequestId = useRef(0);
-  const isAdmin = currentUser?.role === "Admin";
+  const isSuperAdmin =
+    SUPER_ADMIN_UIDS.includes(currentUser?.id) &&
+    currentUser?.role === "SuperAdmin";
+  const isAdmin =
+    currentUser?.role === "Admin" || currentUser?.role === "SuperAdmin";
   const scopedGodown = isAdmin ? activeGodown : currentUser?.godown;
+  const attendanceScopeKey = currentUser
+    ? `${currentUser.id}|${currentUser.role}|${scopedGodown}`
+    : "";
+  const dailyAttendanceKey = attendanceScopeKey
+    ? `${attendanceScopeKey}|${selectedDate}`
+    : "";
+  const calendarQueryKey = attendanceScopeKey
+    ? `${attendanceScopeKey}|${formatLocalDate(calendarMonth)}`
+    : "";
+  const reportQueryKey = attendanceScopeKey
+    ? `${attendanceScopeKey}|${reportFrom}|${reportTo}`
+    : "";
+  const visibleCalendarAttendance =
+    attendanceScopeKey && calendarDataScopeKey === attendanceScopeKey
+      ? attendance
+      : [];
+  const visibleReportAttendance =
+    attendanceScopeKey && reportDataScopeKey === attendanceScopeKey
+      ? reportAttendance
+      : [];
+  const visibleDailyAttendance =
+    dailyAttendanceKey && dailyDataKey === dailyAttendanceKey
+      ? dailyAttendance
+      : [];
+  const visibleCalendarError =
+    calendarErrorQueryKey === calendarQueryKey ? attendanceError : "";
+  const visibleReportError =
+    reportErrorQueryKey === reportQueryKey ? reportAttendanceError : "";
+  const visibleReportDataQueryKey =
+    reportDataScopeKey === attendanceScopeKey ? reportDataQueryKey : "";
+  const [loadedReportFrom, loadedReportTo] = visibleReportDataQueryKey
+    ? visibleReportDataQueryKey.split("|").slice(-2)
+    : [];
+  const reportResultsAreStale =
+    Boolean(visibleReportDataQueryKey) &&
+    visibleReportDataQueryKey !== reportQueryKey;
+  const calendarRefreshPending =
+    attendanceLoading ||
+    (location.pathname === "/calendar" &&
+      Boolean(currentUser) &&
+      calendarDataQueryKey !== calendarQueryKey &&
+      !visibleCalendarError);
+  const reportRefreshPending =
+    reportAttendanceLoading ||
+    (location.pathname === "/reports" &&
+      Boolean(currentUser) &&
+      isAdmin &&
+      reportDataQueryKey !== reportQueryKey &&
+      !visibleReportError);
+  const dailyRefreshPending =
+    dailyAttendanceLoading ||
+    (Boolean(currentUser) &&
+      dailyDataKey !== dailyAttendanceKey &&
+      !dailyAttendanceError);
 
   const loadEmployees = useCallback(async () => {
     const requestId = ++employeeRequestId.current;
@@ -143,7 +210,7 @@ function App() {
     try {
       const employeesCollection = collection(db, "employees");
       const employeeQuery =
-        currentUser.role === "Admin"
+        currentUser.role !== "Staff"
           ? employeesCollection
           : query(
               employeesCollection,
@@ -177,9 +244,16 @@ function App() {
 
   const loadCalendarAttendance = useCallback(async () => {
     const requestId = ++attendanceRequestId.current;
-    if (!currentUser || location.pathname !== "/calendar") {
+    if (!currentUser) {
       setAttendance([]);
+      setCalendarDataScopeKey("");
+      setCalendarDataQueryKey("");
       setAttendanceError("");
+      setCalendarErrorQueryKey("");
+      setAttendanceLoading(false);
+      return true;
+    }
+    if (location.pathname !== "/calendar") {
       setAttendanceLoading(false);
       return true;
     }
@@ -216,11 +290,13 @@ function App() {
           ...attendanceDoc.data(),
         })),
       );
+      setCalendarDataScopeKey(attendanceScopeKey);
+      setCalendarDataQueryKey(calendarQueryKey);
       return true;
     } catch (error) {
       if (requestId === attendanceRequestId.current) {
-        setAttendance([]);
         setAttendanceError(attendanceLoadErrorMessage(error));
+        setCalendarErrorQueryKey(calendarQueryKey);
       }
       console.error("Could not load attendance history from Firestore.", error);
       return false;
@@ -229,17 +305,32 @@ function App() {
         setAttendanceLoading(false);
       }
     }
-  }, [currentUser, isAdmin, scopedGodown, location.pathname, calendarMonth]);
+  }, [
+    attendanceScopeKey,
+    calendarQueryKey,
+    currentUser,
+    isAdmin,
+    scopedGodown,
+    location.pathname,
+    calendarMonth,
+  ]);
 
   const loadReportAttendance = useCallback(
     async (append = false) => {
       const requestId = ++reportAttendanceRequestId.current;
-      if (!currentUser || location.pathname !== "/reports") {
+      if (!currentUser || !isAdmin) {
         setReportAttendance([]);
+        setReportDataScopeKey("");
+        setReportDataQueryKey("");
         setReportAttendanceError("");
+        setReportErrorQueryKey("");
         setReportAttendanceLoading(false);
         setReportHasMore(false);
         reportAttendanceCursor.current = null;
+        return true;
+      }
+      if (location.pathname !== "/reports") {
+        setReportAttendanceLoading(false);
         return true;
       }
       if (
@@ -249,17 +340,18 @@ function App() {
       ) {
         setReportAttendance([]);
         setReportAttendanceError("Choose a valid report date range.");
+        setReportErrorQueryKey(reportQueryKey);
         setReportAttendanceLoading(false);
         setReportHasMore(false);
         reportAttendanceCursor.current = null;
+        setReportDataScopeKey("");
+        setReportDataQueryKey("");
         return false;
       }
 
       setReportAttendanceLoading(true);
       setReportAttendanceError("");
       if (!append) {
-        reportAttendanceCursor.current = null;
-        setReportAttendance([]);
         setReportHasMore(false);
       }
 
@@ -290,11 +382,14 @@ function App() {
         setReportAttendance((previous) =>
           append ? [...previous, ...page] : page,
         );
+        setReportDataScopeKey(attendanceScopeKey);
+        setReportDataQueryKey(reportQueryKey);
         setReportHasMore(snapshot.docs.length === attendancePageSize);
         return true;
       } catch (error) {
         if (requestId === reportAttendanceRequestId.current) {
           setReportAttendanceError(attendanceLoadErrorMessage(error));
+          setReportErrorQueryKey(reportQueryKey);
         }
         console.error("Could not load attendance report from Firestore.", error);
         return false;
@@ -307,6 +402,8 @@ function App() {
     [
       currentUser,
       isAdmin,
+      attendanceScopeKey,
+      reportQueryKey,
       location.pathname,
       reportFrom,
       reportTo,
@@ -318,12 +415,14 @@ function App() {
     const requestId = ++dailyAttendanceRequestId.current;
     if (!currentUser) {
       setDailyAttendance([]);
+      setDailyDataKey("");
       setDailyAttendanceError("");
       setDailyAttendanceLoading(false);
       return true;
     }
     if (!isAttendanceDate(selectedDate)) {
       setDailyAttendance([]);
+      setDailyDataKey("");
       setDailyAttendanceError("Choose a valid date to load attendance.");
       setDailyAttendanceLoading(false);
       return false;
@@ -346,10 +445,10 @@ function App() {
           ...attendanceDoc.data(),
         })),
       );
+      setDailyDataKey(dailyAttendanceKey);
       return true;
     } catch (error) {
       if (requestId === dailyAttendanceRequestId.current) {
-        setDailyAttendance([]);
         setDailyAttendanceError(attendanceLoadErrorMessage(error));
       }
       console.error("Could not load selected-date attendance from Firestore.", error);
@@ -359,7 +458,7 @@ function App() {
         setDailyAttendanceLoading(false);
       }
     }
-  }, [currentUser, isAdmin, scopedGodown, selectedDate]);
+  }, [currentUser, isAdmin, scopedGodown, selectedDate, dailyAttendanceKey]);
 
   useEffect(() => {
     void loadCalendarAttendance();
@@ -388,7 +487,7 @@ function App() {
 
   const loadStaffAccounts = useCallback(async () => {
     const requestId = ++staffAccountsRequestId.current;
-    if (!isAdmin) {
+    if (!isSuperAdmin) {
       setUserAccounts([]);
       setStaffAccountsError("");
       setStaffAccountsLoading(false);
@@ -398,7 +497,7 @@ function App() {
     setStaffAccountsLoading(true);
     setStaffAccountsError("");
     try {
-      const snapshot = await getDocs(collection(db, "users"));
+      const snapshot = await getDocsFromServer(collection(db, "users"));
       if (requestId !== staffAccountsRequestId.current) return false;
 
       setUserAccounts(
@@ -414,12 +513,21 @@ function App() {
                 (typeof profile.name === "string" && profile.name.trim()) ||
                 email ||
                 "Staff account",
-              role: profile.role,
+              role:
+                SUPER_ADMIN_UIDS.includes(accountDoc.id) &&
+                profile.role === "SuperAdmin"
+                  ? "SuperAdmin"
+                  : profile.role,
               godown: profile.godown,
               active: profile.active === true,
             };
           })
-          .filter((account) => account.role === "Staff"),
+          .filter(
+            (account) =>
+              account.role === "Staff" ||
+              account.role === "Admin" ||
+              SUPER_ADMIN_UIDS.includes(account.id),
+          ),
       );
       return true;
     } catch (error) {
@@ -427,8 +535,8 @@ function App() {
         setUserAccounts([]);
         setStaffAccountsError(
           error.code === "permission-denied"
-            ? "Firestore denied access to staff profiles. Verify the Admin access rules."
-            : "Could not load staff profiles. Check your connection and try again.",
+            ? "Firestore denied access to user profiles. Verify the Admin access rules."
+            : "Could not load user profiles. Check your connection and try again.",
         );
       }
       console.error("Could not load staff profiles from Firestore.", error);
@@ -438,10 +546,10 @@ function App() {
         setStaffAccountsLoading(false);
       }
     }
-  }, [isAdmin]);
+  }, [isSuperAdmin]);
 
   useEffect(() => {
-    if (!isAdmin) {
+    if (!isSuperAdmin) {
       ++staffAccountsRequestId.current;
       setUserAccounts([]);
       setStaffAccountsError("");
@@ -453,7 +561,7 @@ function App() {
     return () => {
       ++staffAccountsRequestId.current;
     };
-  }, [isAdmin, loadStaffAccounts]);
+  }, [isSuperAdmin, loadStaffAccounts]);
 
   useEffect(() => {
     if (!currentUser) {
@@ -469,6 +577,62 @@ function App() {
       ++employeeRequestId.current;
     };
   }, [currentUser, loadEmployees]);
+
+  useEffect(() => {
+    if (!currentUser) return undefined;
+
+    return onSnapshot(
+      doc(db, "users", currentUser.id),
+      (profileSnapshot) => {
+        const profile = profileSnapshot.data();
+        const isProtectedSuperAdmin =
+          SUPER_ADMIN_UIDS.includes(currentUser.id) &&
+          profile?.role === "SuperAdmin" &&
+          profile?.active === true;
+        const role = isProtectedSuperAdmin ? "SuperAdmin" : profile?.role;
+        const validRole =
+          isProtectedSuperAdmin ||
+          profile?.role === "Admin" ||
+          profile?.role === "Staff";
+        const validGodown =
+          role !== "Staff" ||
+          (typeof profile?.godown === "string" &&
+            godowns.includes(profile.godown));
+
+        if (
+          !profileSnapshot.exists() ||
+          profile?.active !== true ||
+          !validRole ||
+          !validGodown
+        ) {
+          setCurrentUser(null);
+          setUserAccounts([]);
+          void firebaseSignOut(auth).catch((error) => {
+            console.error("Could not end access after a profile change.", error);
+          });
+          navigate("/login", { replace: true });
+          return;
+        }
+
+        setCurrentUser((previous) =>
+          previous?.id === currentUser.id
+            ? {
+                ...previous,
+                role,
+                godown: role === "Staff" ? profile.godown : null,
+              }
+            : previous,
+        );
+        setActiveGodown(role === "Staff" ? profile.godown : "All godowns");
+      },
+      (error) => {
+        console.error(
+          "Could not subscribe to the signed-in user profile.",
+          error,
+        );
+      },
+    );
+  }, [currentUser?.id, navigate]);
 
   useEffect(() => {
     let isMounted = true;
@@ -518,10 +682,17 @@ function App() {
           }
 
           const profile = profileSnapshot.data();
+          const isProtectedSuperAdmin =
+            SUPER_ADMIN_UIDS.includes(firebaseUser.uid) &&
+            profile.role === "SuperAdmin" &&
+            profile.active === true;
+          const role = isProtectedSuperAdmin ? "SuperAdmin" : profile.role;
           const validRole =
-            profile.role === "Admin" || profile.role === "Staff";
-          const validGodown =
+            isProtectedSuperAdmin ||
             profile.role === "Admin" ||
+            profile.role === "Staff";
+          const validGodown =
+            role !== "Staff" ||
             (typeof profile.godown === "string" &&
               godowns.includes(profile.godown));
           if (profile.active !== true || !validRole || !validGodown) {
@@ -553,11 +724,15 @@ function App() {
               firebaseUser.email ||
               "User",
             email: firebaseUser.email || "",
-            role: profile.role,
-            godown: profile.role === "Admin" ? null : profile.godown,
+            role,
+            godown: role === "Admin" || role === "SuperAdmin"
+              ? null
+              : profile.godown,
           });
           setActiveGodown(
-            profile.role === "Admin" ? "All godowns" : profile.godown,
+            role === "Admin" || role === "SuperAdmin"
+              ? "All godowns"
+              : profile.godown,
           );
           if (isCurrentCheck(checkId, firebaseUser.uid)) {
             setAuthError("");
@@ -632,12 +807,20 @@ function App() {
   };
 
   const createStaffAccount = async (details) => {
-    if (!isAdmin) {
-      throw new Error("Only an Admin can create a staff account.");
+    if (!isSuperAdmin) {
+      throw new Error("Only the SuperAdmin can create an account.");
     }
     const email = details.email.trim();
-    if (!godowns.includes(details.godown)) {
-      throw new Error("Select one of the configured godowns.");
+    const role = details.role;
+    const godown = role === "Admin" ? null : details.godown;
+    if (
+      !["Staff", "Admin"].includes(role) ||
+      (role === "Staff" && !godowns.includes(godown)) ||
+      (role === "Admin" && details.godown !== null)
+    ) {
+      throw new Error(
+        "Choose Staff with one configured godown or Admin with no godown.",
+      );
     }
     if (
       userAccounts.some(
@@ -654,9 +837,9 @@ function App() {
     );
     try {
       await setDoc(doc(db, "users", credential.user.uid), {
-        role: "Staff",
+        role,
         active: true,
-        godown: details.godown,
+        godown,
         email,
         createdAt: serverTimestamp(),
       });
@@ -691,41 +874,95 @@ function App() {
     const refreshed = await loadStaffAccounts();
     showToast(
       refreshed
-        ? "Staff account created"
-        : "Staff account created, but the staff list could not be refreshed.",
+        ? `${role} account created`
+        : `${role} account created, but the account list could not be refreshed.`,
     );
     navigate("/users");
   };
 
   const updateStaffAccount = async (accountId, changes) => {
-    if (!isAdmin) return;
+    if (!isSuperAdmin || SUPER_ADMIN_UIDS.includes(accountId)) return false;
+    const account = userAccounts.find((item) => item.id === accountId);
+    if (!account) {
+      setStaffAccountsError(
+        "This account is no longer available. Reload the list and try again.",
+      );
+      return false;
+    }
+
+    const role = Object.hasOwn(changes, "role") ? changes.role : account.role;
+    const godown = Object.hasOwn(changes, "godown")
+      ? changes.godown
+      : account.godown;
     if (
-      (Object.hasOwn(changes, "godown") &&
-        !godowns.includes(changes.godown)) ||
+      !["Staff", "Admin"].includes(role) ||
+      (role === "Staff" && !godowns.includes(godown)) ||
+      (role === "Admin" && godown !== null) ||
       (Object.hasOwn(changes, "active") &&
         typeof changes.active !== "boolean")
     ) {
-      setStaffAccountsError("Choose a valid godown or account status.");
-      return;
+      setStaffAccountsError("Choose a valid account role, godown, or status.");
+      return false;
+    }
+
+    if (accountId === currentUser.id) {
+      setStaffAccountsError("You cannot manage your own account.");
+      return false;
+    }
+
+    const removesActiveAdmin =
+      account.role === "Admin" &&
+      account.active &&
+      (role !== "Admin" || changes.active === false);
+    if (removesActiveAdmin) {
+      try {
+        const latestAccounts = await getDocsFromServer(collection(db, "users"));
+        const activeAdminCount = latestAccounts.docs.filter((accountDoc) => {
+          const profile = accountDoc.data();
+          return profile.role === "Admin" && profile.active === true;
+        }).length;
+        if (activeAdminCount <= 1) {
+          setStaffAccountsError(
+            "The last active Admin cannot be demoted or deactivated.",
+          );
+          return false;
+        }
+      } catch (error) {
+        setStaffAccountsError(
+          "Could not verify the active Admin count. Try again before changing this account.",
+        );
+        console.error("Could not verify active Admin accounts.", error);
+        return false;
+      }
     }
 
     setUpdatingStaffAccountId(accountId);
     setStaffAccountsError("");
     try {
-      await updateDoc(doc(db, "users", accountId), changes);
+      const profileChanges = {
+        ...changes,
+        ...(Object.hasOwn(changes, "role") || Object.hasOwn(changes, "godown")
+          ? { role, godown }
+          : {}),
+      };
+      await updateDoc(doc(db, "users", accountId), profileChanges);
       setUserAccounts((previous) =>
         previous.map((account) =>
-          account.id === accountId ? { ...account, ...changes } : account,
+          account.id === accountId
+            ? { ...account, ...profileChanges }
+            : account,
         ),
       );
-      showToast("Staff account updated");
+      showToast("Account updated");
+      return true;
     } catch (error) {
       setStaffAccountsError(
         error.code === "permission-denied"
-          ? "Firestore denied this staff profile change. Verify the Admin access rules."
-          : "Could not update this staff account. Please try again.",
+          ? "Firestore denied this account change. Verify the Admin access rules."
+          : "Could not update this account. Please try again.",
       );
-      console.error("Could not update a staff profile in Firestore.", error);
+      console.error("Could not update a user profile in Firestore.", error);
+      return false;
     } finally {
       setUpdatingStaffAccountId("");
     }
@@ -752,7 +989,7 @@ function App() {
   const attendanceRows = useMemo(
     () =>
       visibleEmployees.map((employee) => {
-        const attendanceRecord = dailyAttendance.find(
+        const attendanceRecord = visibleDailyAttendance.find(
           (record) =>
             String(record.employeeId) === String(employee.id) &&
             record.date === selectedDate,
@@ -763,7 +1000,7 @@ function App() {
           attendanceRecord,
         };
       }),
-    [visibleEmployees, dailyAttendance, selectedDate],
+    [visibleEmployees, visibleDailyAttendance, selectedDate],
   );
 
   const showToast = (message) => {
@@ -1057,16 +1294,18 @@ function App() {
             icon={<CalendarDays size={18} />}
             label="Calendar"
           />
-          <NavItem
-            to="/reports"
-            icon={<ChartNoAxesCombined size={18} />}
-            label="Reports"
-          />
-          {isAdmin && (
+          {isSuperAdmin && (
             <NavItem
               to="/users"
               icon={<ShieldCheck size={18} />}
               label="User management"
+            />
+          )}
+          {isAdmin && (
+            <NavItem
+              to="/reports"
+              icon={<ChartNoAxesCombined size={18} />}
+              label="Reports"
             />
           )}
         </nav>
@@ -1194,12 +1433,14 @@ function App() {
               element={
                 <Dashboard
                   employees={scopedEmployees}
-                  attendance={dailyAttendance}
+                  attendance={visibleDailyAttendance}
                   date={selectedDate}
                   setDate={setSelectedDate}
                   isAdmin={isAdmin}
+                  currentUserRole={currentUser.role}
                   activeGodown={scopedGodown}
                   setActiveGodown={setActiveGodown}
+                  attendanceLoading={dailyRefreshPending}
                   navigate={navigate}
                   setSearch={setSearch}
                 />
@@ -1232,7 +1473,8 @@ function App() {
                   onMark={saveAttendance}
                   isAdmin={isAdmin}
                   activeGodown={scopedGodown}
-                  loading={dailyAttendanceLoading}
+                  loading={dailyRefreshPending}
+                  hasCurrentData={dailyDataKey === dailyAttendanceKey}
                   saving={attendanceSaving}
                   error={dailyAttendanceError}
                   onRetry={loadDailyAttendance}
@@ -1243,44 +1485,50 @@ function App() {
               path="/calendar"
               element={
                 <CalendarPage
-                  attendance={attendance}
+                  attendance={visibleCalendarAttendance}
                   employees={visibleEmployees}
                   selectedDate={selectedDate}
                   setSelectedDate={setSelectedDate}
                   navigate={navigate}
                   month={calendarMonth}
                   setMonth={setCalendarMonth}
-                  loading={attendanceLoading}
-                  error={attendanceError}
+                  loading={calendarRefreshPending}
+                  error={visibleCalendarError}
                   onRetry={loadCalendarAttendance}
                 />
               }
             />
             <Route
               path="/reports"
-              element={
+              element={isAdmin ? (
                 <Reports
                   employees={visibleEmployees}
-                  attendance={reportAttendance}
+                  attendance={visibleReportAttendance}
                   activeGodown={scopedGodown}
                   from={reportFrom}
                   to={reportTo}
+                  previousFrom={loadedReportFrom}
+                  previousTo={loadedReportTo}
                   setFrom={setReportFrom}
                   setTo={setReportTo}
-                  loading={reportAttendanceLoading}
+                  loading={reportRefreshPending}
+                  resultsAreStale={reportResultsAreStale}
                   hasMore={reportHasMore}
-                  error={reportAttendanceError}
+                  error={visibleReportError}
                   onRetry={() => loadReportAttendance(false)}
                   onLoadMore={() => loadReportAttendance(true)}
                 />
-              }
+              ) : (
+                <Navigate to="/" replace />
+              )}
             />
             <Route
               path="/users"
               element={
-                isAdmin ? (
+                isSuperAdmin ? (
                   <UsersPage
                     accounts={userAccounts}
+                    currentUserId={currentUser.id}
                     loading={staffAccountsLoading}
                     error={staffAccountsError}
                     updatingAccountId={updatingStaffAccountId}
@@ -1296,7 +1544,7 @@ function App() {
             <Route
               path="/users/new"
               element={
-                isAdmin ? (
+                isSuperAdmin ? (
                   <CreateStaffPage
                     accounts={userAccounts}
                     onCancel={() => navigate("/users")}
@@ -1310,7 +1558,11 @@ function App() {
             <Route
               path="/settings"
               element={
-                <SettingsPage isAdmin={isAdmin} activeGodown={scopedGodown} />
+                <SettingsPage
+                  isAdmin={isAdmin}
+                  isSuperAdmin={isSuperAdmin}
+                  activeGodown={scopedGodown}
+                />
               }
             />
             <Route path="/login" element={<Navigate to="/" replace />} />
@@ -1639,6 +1891,7 @@ function AuthLoadingScreen({ message = "Verifying your sign-in and account acces
 
 function CreateStaffPage({ accounts, onCancel, onCreate }) {
   const [email, setEmail] = useState("");
+  const [role, setRole] = useState("Staff");
   const [godown, setGodown] = useState(godowns[0]);
   const [password, setPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
@@ -1668,7 +1921,12 @@ function CreateStaffPage({ accounts, onCancel, onCreate }) {
 
     setSubmitting(true);
     try {
-      await onCreate({ email: email.trim(), password, godown });
+      await onCreate({
+        email: email.trim(),
+        password,
+        role,
+        godown: role === "Staff" ? godown : null,
+      });
     } catch (error) {
       setErrors({ submit: createStaffErrorMessage(error) });
     } finally {
@@ -1681,7 +1939,7 @@ function CreateStaffPage({ accounts, onCancel, onCreate }) {
       <PageHeading
         eyebrow="NEW STAFF ACCOUNT"
         title="Create a staff account"
-        subtitle="Set up sign-in details and assign this staff member to one godown."
+        subtitle="Set up sign-in details, account role, and access scope."
         action={
           <button className="btn btn-secondary" onClick={onCancel}>
             Cancel
@@ -1694,7 +1952,7 @@ function CreateStaffPage({ accounts, onCancel, onCreate }) {
             <UserRound size={19} />
           </div>
           <div>
-            <h2>Staff details</h2>
+            <h2>Account details</h2>
             <p>These details will be used to sign in to PeopleHub.</p>
           </div>
         </div>
@@ -1714,24 +1972,38 @@ function CreateStaffPage({ accounts, onCancel, onCreate }) {
           </div>
           <div className="registration-access">
             <div>
-              <span className="registration-field-label">Account role</span>
-              <span className="role-badge staff-role">Staff</span>
-              <small>This form always creates a Staff account.</small>
-            </div>
-            <div className="auth-field">
-              <label htmlFor="staff-godown">Assigned godown</label>
+              <label htmlFor="staff-account-role">Account role</label>
               <select
-                id="staff-godown"
-                value={godown}
-                onChange={(event) => setGodown(event.target.value)}
+                id="staff-account-role"
+                value={role}
+                onChange={(event) => setRole(event.target.value)}
                 required
               >
-                {godowns.map((name) => (
-                  <option key={name}>{name}</option>
-                ))}
+                <option value="Staff">Staff</option>
+                <option value="Admin">Admin</option>
               </select>
-              <small>This account will only see this godown.</small>
+              <small>
+                {role === "Staff"
+                  ? "Staff accounts are limited to one assigned godown."
+                  : "Admin accounts can access all godowns and operational features."}
+              </small>
             </div>
+            {role === "Staff" && (
+              <div className="auth-field">
+                <label htmlFor="staff-godown">Assigned godown</label>
+                <select
+                  id="staff-godown"
+                  value={godown}
+                  onChange={(event) => setGodown(event.target.value)}
+                  required
+                >
+                  {godowns.map((name) => (
+                    <option key={name}>{name}</option>
+                  ))}
+                </select>
+                <small>This account will only see this godown.</small>
+              </div>
+            )}
           </div>
           <div className="registration-passwords">
             <div
@@ -1800,10 +2072,10 @@ function CreateStaffPage({ accounts, onCancel, onCreate }) {
         <div className="registration-notice">
           <ShieldCheck size={16} />
           <span>
-            This screen is restricted to Admin profiles, but client-side code
-            cannot securely enforce Admin-only Authentication account creation.
-            Use a trusted backend to enforce who can create Auth accounts;
-            Firestore rules separately control profile access.
+            Only the protected SuperAdmin can create account profiles. The
+            secondary Firebase Authentication client preserves your session,
+            but a trusted backend is required to restrict Authentication user
+            creation itself.
           </span>
         </div>
         {errors.submit && (
@@ -1823,7 +2095,8 @@ function CreateStaffPage({ accounts, onCancel, onCreate }) {
             className="btn btn-primary"
             disabled={submitting}
           >
-            <Plus size={16} /> Create staff account
+            <Plus size={16} /> Create{" "}
+            {role === "Staff" ? "Staff" : "Admin"} account
           </button>
         </div>
       </form>
@@ -1905,8 +2178,10 @@ function Dashboard({
   date,
   setDate,
   isAdmin,
+  currentUserRole,
   activeGodown,
   setActiveGodown,
+  attendanceLoading,
   navigate,
   setSearch,
 }) {
@@ -1928,7 +2203,11 @@ function Dashboard({
     <>
       <PageHeading
         eyebrow={isAdmin ? "COMPANY OVERVIEW" : "STAFF WORKSPACE"}
-        title={isAdmin ? "Good morning, Admin" : "Welcome to your workspace"}
+        title={
+          isAdmin
+            ? `Good morning, ${currentUserRole}`
+            : "Welcome to your workspace"
+        }
         subtitle={
           isAdmin
             ? "Here’s a snapshot of your employee register and attendance."
@@ -1943,6 +2222,11 @@ function Dashboard({
           </button>
         }
       />
+      {attendanceLoading && (
+        <div className="data-refresh-indicator" role="status" aria-live="polite">
+          Updating attendance for {date}…
+        </div>
+      )}
       <div className="notice-strip">
         <div className="notice-symbol">
           <ShieldCheck size={17} />
@@ -1980,15 +2264,19 @@ function Dashboard({
         />
         <StatCard
           label="Present"
-          value={count("Present")}
-          note={`${marked ? Math.round((count("Present") / marked) * 100) : 0}% of marked`}
+          value={attendanceLoading ? "…" : count("Present")}
+          note={
+            attendanceLoading
+              ? "Updating…"
+              : `${marked ? Math.round((count("Present") / marked) * 100) : 0}% of marked`
+          }
           icon={<CircleCheck size={19} />}
           tone="green"
           onClick={() => goStatus("Present")}
         />
         <StatCard
           label="Absent"
-          value={count("Absent")}
+          value={attendanceLoading ? "…" : count("Absent")}
           note="Needs follow-up"
           icon={<CircleX size={19} />}
           tone="red"
@@ -1996,7 +2284,7 @@ function Dashboard({
         />
         <StatCard
           label="Sick"
-          value={count("Sick")}
+          value={attendanceLoading ? "…" : count("Sick")}
           note="Marked sick"
           icon={<Clock3 size={19} />}
           tone="orange"
@@ -2004,7 +2292,7 @@ function Dashboard({
         />
         <StatCard
           label="On leave"
-          value={count("On Leave")}
+          value={attendanceLoading ? "…" : count("On Leave")}
           note="Approved / reported leave"
           icon={<CalendarClock size={19} />}
           tone="purple"
@@ -2012,7 +2300,7 @@ function Dashboard({
         />
         <StatCard
           label="Overtime"
-          value={count("Overtime")}
+          value={attendanceLoading ? "…" : count("Overtime")}
           note="Worked beyond scheduled hours"
           icon={<Clock3 size={19} />}
           tone="blue"
@@ -2090,12 +2378,13 @@ function Dashboard({
         </div>
         <div className="completion-row">
           <div className="completion-number">
-            {marked}
+            {attendanceLoading ? "…" : marked}
             <span> / {scoped.length} marked</span>
           </div>
           <span className="completion-percent">
-            {scoped.length ? Math.round((marked / scoped.length) * 100) : 0}%
-            complete
+            {attendanceLoading
+              ? "Updating"
+              : `${scoped.length ? Math.round((marked / scoped.length) * 100) : 0}% complete`}
           </span>
         </div>
         <div className="progress-track">
@@ -2287,6 +2576,7 @@ function Attendance({
   isAdmin,
   activeGodown,
   loading,
+  hasCurrentData,
   saving,
   error,
   onRetry,
@@ -2306,6 +2596,11 @@ function Attendance({
         title="Daily attendance"
         subtitle="Mark attendance and correct saved entries for the selected date."
       />
+      {loading && (
+        <div className="data-refresh-indicator" role="status" aria-live="polite">
+          Updating attendance for {date}…
+        </div>
+      )}
       {error && (
         <div
           className="employee-load-error employee-load-error-banner"
@@ -2351,14 +2646,16 @@ function Attendance({
           <div className="mini-stat" key={s}>
             <span className={`mini-dot ${s.toLowerCase().replace(" ", "-")}`} />
             <span>{s}</span>
-            <strong>{summary(s)}</strong>
+            <strong>{hasCurrentData ? summary(s) : "…"}</strong>
           </div>
         ))}
       </div>
       <div className="panel table-panel">
         <div className="table-topline">
           <div>
-            <strong>{filtered.length} employees</strong>
+            <strong>
+              {hasCurrentData ? filtered.length : "—"} employees
+            </strong>
             <span> · {date}</span>
           </div>
           <span className="muted-small">
@@ -2377,21 +2674,21 @@ function Attendance({
               </tr>
             </thead>
             <tbody>
-              {loading && (
+              {loading && !hasCurrentData && !error && (
                 <tr>
                   <td colSpan={isAdmin ? 5 : 4} className="empty-state">
                     Loading attendance for {date}...
                   </td>
                 </tr>
               )}
-              {!loading && error && (
+              {error && !hasCurrentData && (
                 <tr>
                   <td colSpan={isAdmin ? 5 : 4} className="empty-state">
                     Attendance could not be loaded.
                   </td>
                 </tr>
               )}
-              {!loading && !error && filtered.map((e) => (
+              {hasCurrentData && filtered.map((e) => (
                 <tr key={e.id}>
                   <td>
                     <div className="employee-cell">
@@ -2407,7 +2704,7 @@ function Attendance({
                     <select
                       className={`attendance-select ${statusClass(e.attendance)}`}
                       value={e.attendance}
-                      disabled={saving || Boolean(error)}
+                      disabled={loading || saving || Boolean(error)}
                       onChange={(ev) => onMark(e.id, ev.target.value)}
                     >
                       <option disabled>Not marked</option>
@@ -2425,7 +2722,7 @@ function Attendance({
                   </td>
                 </tr>
               ))}
-              {!loading && !error && filtered.length === 0 && (
+              {hasCurrentData && !loading && !error && filtered.length === 0 && (
                 <tr>
                   <td colSpan={isAdmin ? 5 : 4} className="empty-state">
                     No attendance entries for this filter.
@@ -2468,7 +2765,7 @@ function CalendarPage({
     ...Array.from({ length: days }, (_, i) => i + 1),
   ];
   while (cells.length % 7) cells.push(null);
-  const visibleAttendance = loading ? [] : attendance;
+  const visibleAttendance = attendance;
   const countFor = (day) => {
     if (!day) return 0;
     const date = `${year}-${fmt(m + 1)}-${fmt(day)}`;
@@ -2490,6 +2787,11 @@ function CalendarPage({
         title="Attendance calendar"
         subtitle="Choose a day to review or update attendance. Select a date to open its daily register."
       />
+      {loading && (
+        <div className="data-refresh-indicator" role="status" aria-live="polite">
+          Updating calendar attendance…
+        </div>
+      )}
       {error && (
         <div
           className="employee-load-error employee-load-error-banner"
@@ -2612,9 +2914,12 @@ function Reports({
   activeGodown,
   from,
   to,
+  previousFrom,
+  previousTo,
   setFrom,
   setTo,
   loading,
+  resultsAreStale,
   hasMore,
   error,
   onRetry,
@@ -2622,8 +2927,7 @@ function Reports({
 }) {
   const rows = attendance.filter(
     (a) =>
-      a.date >= from &&
-      a.date <= to &&
+      (resultsAreStale || (a.date >= from && a.date <= to)) &&
       employees.some((e) => String(e.id) === String(a.employeeId)),
   );
   return (
@@ -2699,6 +3003,13 @@ function Reports({
           </div>
           <span className="status-badge">{rows.length} loaded</span>
         </div>
+        {resultsAreStale && (
+          <div className="data-refresh-indicator report-refresh" role="status" aria-live="polite">
+            {loading
+              ? `Showing previous results from ${previousFrom} to ${previousTo} while updating the selected range.`
+              : `Showing previous results from ${previousFrom} to ${previousTo}; they are not results for the selected range.`}
+          </div>
+        )}
         <div className="table-wrap">
           <table>
             <thead>
@@ -2710,8 +3021,7 @@ function Reports({
               </tr>
             </thead>
             <tbody>
-              {!loading &&
-                rows.map((a) => {
+              {rows.map((a) => {
                   const employee = employees.find(
                     (item) => String(item.id) === String(a.employeeId),
                   );
@@ -2732,14 +3042,14 @@ function Reports({
                   </tr>
                   );
                 })}
-              {loading && (
+              {loading && rows.length === 0 && (
                 <tr>
                   <td colSpan="4" className="empty-state">
                     Loading attendance history...
                   </td>
                 </tr>
               )}
-              {!loading && !rows.length && (
+              {!loading && !error && !rows.length && (
                 <tr>
                   <td colSpan="4" className="empty-state">
                     No entries in this date range.
@@ -2768,6 +3078,7 @@ function Reports({
 
 function UsersPage({
   accounts,
+  currentUserId,
   loading,
   error,
   updatingAccountId,
@@ -2780,10 +3091,10 @@ function UsersPage({
       <PageHeading
         eyebrow="ACCESS CONTROL"
         title="User management"
-        subtitle="View staff profiles, assign godowns, and manage account access."
+        subtitle="Manage account roles, godown assignments, and access."
         action={
           <button className="btn btn-primary" onClick={onCreate}>
-            <Plus size={16} /> Create staff account
+            <Plus size={16} /> Create account
           </button>
         }
       />
@@ -2792,10 +3103,11 @@ function UsersPage({
           <LockKeyhole size={17} />
         </div>
         <div>
-          <strong>Admin staff account management</strong>
+          <strong>SuperAdmin account management</strong>
           <span>
-            Staff accounts are limited to one assigned godown. Account deletion
-            is not available here.
+            Staff accounts are limited to one assigned godown. Your own role
+            cannot be changed, and the last active Admin cannot be demoted or
+            deactivated here.
           </span>
         </div>
       </div>
@@ -2830,75 +3142,23 @@ function UsersPage({
               {loading && (
                 <tr>
                   <td colSpan="5" className="empty-state">
-                    Loading staff profiles...
+                    Loading user profiles...
                   </td>
                 </tr>
               )}
               {accounts.map((account) => (
-                <tr key={account.id}>
-                  <td>
-                    <div className="employee-cell">
-                      <div className="avatar small">
-                        {initials(account.name || account.email)}
-                      </div>
-                      <div>
-                        <strong>{account.name || "Staff account"}</strong>
-                        <span>{account.email}</span>
-                      </div>
-                    </div>
-                  </td>
-                  <td>
-                    <span
-                      className={`role-badge ${account.role === "Admin" ? "admin-role" : "staff-role"}`}
-                    >
-                      {account.role}
-                    </span>
-                  </td>
-                  <td>
-                    <select
-                      className="staff-godown-select"
-                      aria-label={`Assigned godown for ${account.email}`}
-                      value={
-                        godowns.includes(account.godown) ? account.godown : ""
-                      }
-                      disabled={Boolean(updatingAccountId)}
-                      onChange={(event) =>
-                        onUpdate(account.id, { godown: event.target.value })
-                      }
-                    >
-                      <option value="">Select a godown</option>
-                      {godowns.map((name) => (
-                        <option key={name} value={name}>
-                          {name}
-                        </option>
-                      ))}
-                    </select>
-                  </td>
-                  <td>
-                    <span
-                      className={`status-badge ${account.active ? "active-status" : "inactive-status"}`}
-                    >
-                      {account.active ? "Active" : "Inactive"}
-                    </span>
-                  </td>
-                  <td>
-                    <button
-                      type="button"
-                      className="btn btn-secondary btn-small"
-                      disabled={Boolean(updatingAccountId)}
-                      onClick={() =>
-                        onUpdate(account.id, { active: !account.active })
-                      }
-                    >
-                      {account.active ? "Deactivate" : "Activate"}
-                    </button>
-                  </td>
-                </tr>
+                <UserAccountRow
+                  key={account.id}
+                  account={account}
+                  currentUserId={currentUserId}
+                  disabled={Boolean(updatingAccountId)}
+                  onUpdate={onUpdate}
+                />
               ))}
               {!loading && !error && !accounts.length && (
                 <tr>
                   <td colSpan="5" className="empty-state">
-                    No staff profiles found.
+                    No user profiles found.
                   </td>
                 </tr>
               )}
@@ -2910,7 +3170,131 @@ function UsersPage({
   );
 }
 
-function SettingsPage({ isAdmin, activeGodown }) {
+function UserAccountRow({
+  account,
+  currentUserId,
+  disabled,
+  onUpdate,
+}) {
+  const [pendingRole, setPendingRole] = useState(null);
+  const role = pendingRole || account.role;
+  const canEditRole = account.id !== currentUserId;
+
+  useEffect(() => {
+    setPendingRole(null);
+  }, [account.role, account.godown]);
+
+  const selectRole = (nextRole) => {
+    if (nextRole === account.role) {
+      setPendingRole(null);
+      return;
+    }
+    if (nextRole === "Staff" && account.role === "Admin") {
+      setPendingRole("Staff");
+      return;
+    }
+    void onUpdate(account.id, {
+      role: nextRole,
+      godown: nextRole === "Admin" ? null : account.godown,
+    });
+  };
+
+  const selectGodown = async (nextGodown) => {
+    if (!godowns.includes(nextGodown)) return;
+    const changes =
+      pendingRole === "Staff"
+        ? { role: "Staff", godown: nextGodown }
+        : { godown: nextGodown };
+    const updated = await onUpdate(account.id, changes);
+    if (updated && pendingRole) setPendingRole(null);
+  };
+
+  return (
+    <tr>
+      <td>
+        <div className="employee-cell">
+          <div className="avatar small">
+            {initials(account.name || account.email)}
+          </div>
+          <div>
+            <strong>{account.name || "User account"}</strong>
+            <span>{account.email}</span>
+          </div>
+        </div>
+      </td>
+      <td>
+        {SUPER_ADMIN_UIDS.includes(account.id) ? (
+          <span className="role-badge admin-role">{account.role}</span>
+        ) : (
+          <select
+            className="staff-godown-select"
+            aria-label={`Account role for ${account.email}`}
+            value={role}
+            disabled={disabled || !canEditRole}
+            onChange={(event) => selectRole(event.target.value)}
+          >
+            <option value="Staff">Staff</option>
+            <option value="Admin">Admin</option>
+          </select>
+        )}
+      </td>
+      <td>
+        {SUPER_ADMIN_UIDS.includes(account.id) ? (
+          <span className="muted-small">All godowns</span>
+        ) : role === "Staff" ? (
+          <select
+            className="staff-godown-select"
+            aria-label={`Assigned godown for ${account.email}`}
+            value={
+              pendingRole === "Staff"
+                ? ""
+                : godowns.includes(account.godown)
+                  ? account.godown
+                  : ""
+            }
+            required
+            disabled={disabled}
+            onChange={(event) => void selectGodown(event.target.value)}
+          >
+            <option value="">Select a godown</option>
+            {godowns.map((name) => (
+              <option key={name} value={name}>
+                {name}
+              </option>
+            ))}
+          </select>
+        ) : (
+          <span className="muted-small">All godowns</span>
+        )}
+      </td>
+      <td>
+        <span
+          className={`status-badge ${account.active ? "active-status" : "inactive-status"}`}
+        >
+          {account.active ? "Active" : "Inactive"}
+        </span>
+      </td>
+      <td>
+        <button
+          type="button"
+          className="btn btn-secondary btn-small"
+          disabled={
+            disabled ||
+            account.id === currentUserId ||
+            SUPER_ADMIN_UIDS.includes(account.id)
+          }
+          onClick={() =>
+            void onUpdate(account.id, { active: !account.active })
+          }
+        >
+          {account.active ? "Deactivate" : "Activate"}
+        </button>
+      </td>
+    </tr>
+  );
+}
+
+function SettingsPage({ isAdmin, isSuperAdmin, activeGodown }) {
   return (
     <>
       <PageHeading
@@ -2934,11 +3318,15 @@ function SettingsPage({ isAdmin, activeGodown }) {
           <h3>Account access</h3>
           <p>
             {isAdmin
-              ? "You are previewing the Admin experience."
+              ? `You are signed in as ${isSuperAdmin ? "SuperAdmin" : "Admin"}.`
               : `Your Staff account is assigned to ${activeGodown}.`}
           </p>
           <span className="settings-meta">
-            {isAdmin ? "Admin · all godowns" : `Staff · ${activeGodown}`}
+            {isSuperAdmin
+              ? "SuperAdmin · all godowns"
+              : isAdmin
+                ? "Admin · all godowns"
+                : `Staff · ${activeGodown}`}
           </span>
         </div>
         <div className="panel settings-card">
