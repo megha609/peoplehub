@@ -246,7 +246,7 @@ service cloud.firestore {
         && validEmployee(request.resource.data)
         && request.resource.data.createdAt == resource.data.createdAt;
 
-      allow delete: if false;
+      allow delete: if isSuperAdmin();
     }
 
     match /attendance/{attendanceId} {

@@ -36,12 +36,19 @@ import {
   CalendarClock,
   X,
   Save,
+  Trash2,
   ArrowUpRight,
   Building2,
   History,
   SlidersHorizontal,
+  Upload,
 } from "lucide-react";
 import { godowns } from "./data";
+import {
+  runEmployeeWorkbookWorker,
+  runReportWorkbookWorker,
+} from "./employeeImport";
+import { normalizeComparisonName } from "./employeeName";
 import {
   createUserWithEmailAndPassword,
   deleteUser,
@@ -53,6 +60,7 @@ import {
 import {
   addDoc,
   collection,
+  deleteDoc,
   doc,
   getDoc,
   getDocs,
@@ -67,6 +75,7 @@ import {
   startAfter,
   updateDoc,
   where,
+  writeBatch,
 } from "firebase/firestore";
 import { auth, db, staffAccountAuth } from "./firebase";
 
@@ -86,6 +95,20 @@ const titleMap = {
   "/settings": "Settings",
 };
 
+function createReportAttendanceQuery(from, to, scopedGodown, cursor = null) {
+  const constraints = [
+    where("date", ">=", from),
+    where("date", "<=", to),
+    orderBy("date", "desc"),
+    limit(attendancePageSize),
+  ];
+  if (scopedGodown !== "All godowns") {
+    constraints.unshift(where("godown", "==", scopedGodown));
+  }
+  if (cursor) constraints.push(startAfter(cursor));
+  return query(collection(db, "attendance"), ...constraints);
+}
+
 function App() {
   const [userAccounts, setUserAccounts] = useState([]);
   const [staffAccountsLoading, setStaffAccountsLoading] = useState(false);
@@ -98,6 +121,7 @@ function App() {
   const [employees, setEmployees] = useState([]);
   const [employeesLoading, setEmployeesLoading] = useState(true);
   const [employeesError, setEmployeesError] = useState("");
+  const [employeeTemplateLoading, setEmployeeTemplateLoading] = useState(false);
   const [attendance, setAttendance] = useState([]);
   const [calendarDataScopeKey, setCalendarDataScopeKey] = useState("");
   const [calendarDataQueryKey, setCalendarDataQueryKey] = useState("");
@@ -110,6 +134,7 @@ function App() {
   const [dailyDataKey, setDailyDataKey] = useState("");
   const [attendanceLoading, setAttendanceLoading] = useState(false);
   const [reportAttendanceLoading, setReportAttendanceLoading] = useState(false);
+  const [reportExportLoading, setReportExportLoading] = useState(false);
   const [reportAttendanceError, setReportAttendanceError] = useState("");
   const [reportHasMore, setReportHasMore] = useState(false);
   const [reportFrom, setReportFrom] = useState(today);
@@ -126,6 +151,7 @@ function App() {
   const [modal, setModal] = useState(null);
   const [mobileOpen, setMobileOpen] = useState(false);
   const [toast, setToast] = useState("");
+  const [toastType, setToastType] = useState("success");
   const location = useLocation();
   const navigate = useNavigate();
   const authCheckId = useRef(0);
@@ -213,9 +239,9 @@ function App() {
         currentUser.role !== "Staff"
           ? employeesCollection
           : query(
-              employeesCollection,
-              where("godown", "==", currentUser.godown),
-            );
+            employeesCollection,
+            where("godown", "==", currentUser.godown),
+          );
       const snapshot = await getDocs(employeeQuery);
       if (requestId !== employeeRequestId.current) return false;
 
@@ -356,20 +382,13 @@ function App() {
       }
 
       try {
-        const constraints = [
-          where("date", ">=", reportFrom),
-          where("date", "<=", reportTo),
-          orderBy("date", "desc"),
-          limit(attendancePageSize),
-        ];
-        if (!(isAdmin && scopedGodown === "All godowns")) {
-          constraints.unshift(where("godown", "==", scopedGodown));
-        }
-        if (append && reportAttendanceCursor.current) {
-          constraints.push(startAfter(reportAttendanceCursor.current));
-        }
         const snapshot = await getDocs(
-          query(collection(db, "attendance"), ...constraints),
+          createReportAttendanceQuery(
+            reportFrom,
+            reportTo,
+            scopedGodown,
+            append ? reportAttendanceCursor.current : null,
+          ),
         );
         if (requestId !== reportAttendanceRequestId.current) return false;
 
@@ -410,6 +429,83 @@ function App() {
       scopedGodown,
     ],
   );
+
+  const downloadAttendanceReport = async () => {
+    if (!currentUser || !isAdmin || reportExportLoading) return;
+    if (
+      !isAttendanceDate(reportFrom) ||
+      !isAttendanceDate(reportTo) ||
+      reportFrom > reportTo
+    ) {
+      showToast("Choose a valid report date range before downloading.", "error");
+      return;
+    }
+
+    setReportExportLoading(true);
+    try {
+      const records = [];
+      let cursor = null;
+      while (true) {
+        const snapshot = await getDocs(
+          createReportAttendanceQuery(
+            reportFrom,
+            reportTo,
+            scopedGodown,
+            cursor,
+          ),
+        );
+        records.push(
+          ...snapshot.docs.map((attendanceDoc) => ({
+            id: attendanceDoc.id,
+            ...attendanceDoc.data(),
+          })),
+        );
+        if (snapshot.docs.length < attendancePageSize) break;
+        cursor = snapshot.docs[snapshot.docs.length - 1];
+      }
+
+      const validRecords = records
+        .filter((record) => statuses.includes(record.status))
+        .sort(
+          (left, right) =>
+            left.date.localeCompare(right.date) ||
+            String(left.godown || "").localeCompare(
+              String(right.godown || ""),
+            ) ||
+            (left.employeeName || "").localeCompare(right.employeeName || ""),
+        );
+      const buffer = await runReportWorkbookWorker({
+        type: "report",
+        from: reportFrom,
+        to: reportTo,
+        godown:
+          scopedGodown === "All godowns" ? "All Godowns" : scopedGodown,
+        records: validRecords,
+        statuses,
+      });
+      const url = URL.createObjectURL(
+        new Blob([buffer], {
+          type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        }),
+      );
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = `peoplehub-attendance-${reportFrom}-to-${reportTo}.xlsx`;
+      link.click();
+      window.setTimeout(() => URL.revokeObjectURL(url), 1000);
+      showToast("Attendance report downloaded.");
+    } catch (error) {
+      console.error("Could not download the attendance report.", error);
+      showToast(
+        error?.code
+          ? attendanceLoadErrorMessage(error)
+          : error.message || "Could not create the attendance report workbook.",
+        "error",
+      );
+    } finally {
+      setReportExportLoading(false);
+    }
+  };
 
   const loadDailyAttendance = useCallback(async () => {
     const requestId = ++dailyAttendanceRequestId.current;
@@ -515,7 +611,7 @@ function App() {
                 "Staff account",
               role:
                 SUPER_ADMIN_UIDS.includes(accountDoc.id) &&
-                profile.role === "SuperAdmin"
+                  profile.role === "SuperAdmin"
                   ? "SuperAdmin"
                   : profile.role,
               godown: profile.godown,
@@ -617,10 +713,10 @@ function App() {
         setCurrentUser((previous) =>
           previous?.id === currentUser.id
             ? {
-                ...previous,
-                role,
-                godown: role === "Staff" ? profile.godown : null,
-              }
+              ...previous,
+              role,
+              godown: role === "Staff" ? profile.godown : null,
+            }
             : previous,
         );
         setActiveGodown(role === "Staff" ? profile.godown : "All godowns");
@@ -988,24 +1084,148 @@ function App() {
 
   const attendanceRows = useMemo(
     () =>
-      visibleEmployees.map((employee) => {
-        const attendanceRecord = visibleDailyAttendance.find(
-          (record) =>
-            String(record.employeeId) === String(employee.id) &&
-            record.date === selectedDate,
-        );
-        return {
-          ...employee,
-          attendance: attendanceRecord?.status || "Not marked",
-          attendanceRecord,
-        };
-      }),
+      visibleEmployees
+        .filter((employee) => employee.status === "Active")
+        .map((employee) => {
+          const attendanceRecord = visibleDailyAttendance.find(
+            (record) =>
+              String(record.employeeId) === String(employee.id) &&
+              record.date === selectedDate,
+          );
+          return {
+            ...employee,
+            attendance: attendanceRecord?.status || "Not marked",
+            attendanceRecord,
+          };
+        }),
     [visibleEmployees, visibleDailyAttendance, selectedDate],
   );
 
-  const showToast = (message) => {
+  const showToast = (message, type = "success") => {
+    setToastType(type);
     setToast(message);
     window.setTimeout(() => setToast(""), 2600);
+  };
+
+  const deleteEmployee = async (employee) => {
+    if (!currentUser || !isSuperAdmin) {
+      showToast("Only SuperAdmin accounts can delete employees.", "error");
+      return;
+    }
+    if (
+      !window.confirm(
+        `Permanently delete the employee record for ${employee.name}? Attendance records and audit history will be retained.`,
+      )
+    ) {
+      return;
+    }
+
+    try {
+      await deleteDoc(doc(db, "employees", employee.id));
+      const refreshed = await loadEmployees();
+      showToast(
+        refreshed
+          ? `${employee.name} was deleted.`
+          : `${employee.name} was deleted, but the employee list could not be refreshed.`,
+      );
+    } catch (error) {
+      console.error("Could not delete employee record from Firestore.", error);
+      showToast(
+        error.code === "permission-denied"
+          ? "Firestore denied employee deletion. Only the protected SuperAdmin account can delete employee records."
+          : `Could not delete ${employee.name}. Please try again.`,
+        "error",
+      );
+    }
+  };
+
+  const downloadEmployeeTemplate = async () => {
+    if (!currentUser || !isAdmin || employeeTemplateLoading) return;
+    setEmployeeTemplateLoading(true);
+    try {
+      const buffer = await runEmployeeWorkbookWorker({ type: "template" });
+      const url = URL.createObjectURL(
+        new Blob([buffer], {
+          type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        }),
+      );
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = "peoplehub-employee-template.xlsx";
+      link.click();
+      window.setTimeout(() => URL.revokeObjectURL(url), 1000);
+    } catch (error) {
+      console.error("Could not create the employee import template.", error);
+      showToast(error.message || "Could not create the Excel template.");
+    } finally {
+      setEmployeeTemplateLoading(false);
+    }
+  };
+
+  const getEmployeesForImport = async () => {
+    if (!currentUser || !isAdmin) {
+      throw new Error("Only Admin accounts can import employee records.");
+    }
+    try {
+      const snapshot = await getDocsFromServer(collection(db, "employees"));
+      return snapshot.docs.map((employeeDoc) => {
+        const employee = employeeDoc.data();
+        return { name: employee.name, godown: employee.godown };
+      });
+    } catch (error) {
+      console.error("Could not load current employees for import validation.", error);
+      if (error.code === "permission-denied") {
+        throw new Error("Firestore denied access to employee records.");
+      }
+      throw new Error("Could not check existing employees. Check your connection and try again.");
+    }
+  };
+
+  const saveImportedEmployees = async (rows) => {
+    if (!currentUser || !isAdmin) {
+      throw new Error("Only Admin accounts can import employee records.");
+    }
+    let importedCount = 0;
+    try {
+      for (let offset = 0; offset < rows.length; offset += 500) {
+        const batchRows = rows.slice(offset, offset + 500);
+        const batch = writeBatch(db);
+        for (const row of batchRows) {
+          const employeeRef = doc(collection(db, "employees"));
+          batch.set(employeeRef, {
+            name: row.name,
+            role: row.role,
+            godown: row.godown,
+            status: row.status,
+            createdAt: serverTimestamp(),
+            updatedAt: serverTimestamp(),
+          });
+        }
+        await batch.commit();
+        importedCount += batchRows.length;
+      }
+    } catch (error) {
+      console.error("Could not save an employee import batch to Firestore.", error);
+      if (importedCount > 0) {
+        showToast(
+          `Imported ${importedCount} ${importedCount === 1 ? "employee" : "employees"}; some eligible rows could not be imported.`,
+        );
+      }
+      const saveError = new Error(
+        error.code === "permission-denied"
+          ? "Firestore denied this employee import. Verify your account permissions and Firestore security rules."
+          : "Could not save an employee import batch. Please try again.",
+      );
+      saveError.importedCount = importedCount;
+      throw saveError;
+    }
+    await loadEmployees();
+    if (importedCount > 0) {
+      showToast(
+        `Successfully imported ${importedCount} ${importedCount === 1 ? "employee" : "employees"}.`,
+      );
+    }
+    return importedCount;
   };
 
   const saveEmployee = async (data) => {
@@ -1032,6 +1252,40 @@ function App() {
       updatedAt: serverTimestamp(),
     };
     if (isAdmin) employeeData.godown = godown;
+
+    if (!data.id) {
+      let existingEmployees;
+      try {
+        existingEmployees = await getDocsFromServer(
+          collection(db, "employees"),
+        );
+      } catch (error) {
+        console.error(
+          "Could not check existing employee names before registration.",
+          error,
+        );
+        if (error.code === "permission-denied") {
+          throw new Error("Firestore denied access to employee records.");
+        }
+        throw new Error(
+          "Could not check existing employees. Check your connection and try again.",
+        );
+      }
+
+      const normalizedName = normalizeComparisonName(name);
+      const duplicateExists = existingEmployees.docs.some((employeeDoc) => {
+        const existingName = employeeDoc.data().name;
+        return (
+          typeof existingName === "string" &&
+          normalizeComparisonName(existingName) === normalizedName
+        );
+      });
+      if (duplicateExists) {
+        throw new Error(
+          "An employee with this name already exists in another or the same godown.",
+        );
+      }
+    }
 
     try {
       if (data.id) {
@@ -1087,6 +1341,7 @@ function App() {
     );
     if (
       !employee ||
+      employee.status !== "Active" ||
       !godowns.includes(employee.godown) ||
       (!isAdmin && employee.godown !== currentUser.godown) ||
       (isAdmin &&
@@ -1231,15 +1486,14 @@ function App() {
   const openEditEmployee = (employee) => {
     if (isAdmin) setModal({ type: "employee", employee });
   };
+  const openEmployeeImport = () => {
+    if (isAdmin) setModal({ type: "employeeImport" });
+  };
 
-  if (authLoading || (currentUser && employeesLoading)) {
+  if (authLoading) {
     return (
       <AuthLoadingScreen
-        message={
-          authLoading
-            ? "Verifying your sign-in and account access..."
-            : "Loading employee records..."
-        }
+        message="Verifying your sign-in and account access..."
       />
     );
   }
@@ -1319,7 +1573,7 @@ function App() {
               className={`godown-link ${activeGodown === "All godowns" ? "selected" : ""}`}
               onClick={() => {
                 setActiveGodown("All godowns");
-                navigate("/");
+                navigate(location.pathname);
                 setMobileOpen(false);
               }}
             >
@@ -1332,7 +1586,7 @@ function App() {
                 className={`godown-link ${activeGodown === name ? "selected" : ""}`}
                 onClick={() => {
                   setActiveGodown(name);
-                  navigate("/employees");
+                  navigate(location.pathname);
                   setMobileOpen(false);
                 }}
               >
@@ -1363,8 +1617,8 @@ function App() {
             </div>
             <strong>Records made easier</strong>
             <p>
-              PeopleHub is a supporting register. Biometric records remain the
-              primary reference.
+              Bring employee details and daily attendance together in one clear
+              view.
             </p>
           </div>
           <div className="profile-mini">
@@ -1455,7 +1709,12 @@ function App() {
                   setSearch={setSearch}
                   onAdd={openAddEmployee}
                   onEdit={openEditEmployee}
+                  onDelete={deleteEmployee}
+                  onImport={openEmployeeImport}
+                  onDownloadTemplate={downloadEmployeeTemplate}
+                  templateLoading={employeeTemplateLoading}
                   isAdmin={isAdmin}
+                  isSuperAdmin={isSuperAdmin}
                   activeGodown={scopedGodown}
                   loading={employeesLoading}
                   error={employeesError}
@@ -1486,7 +1745,7 @@ function App() {
               element={
                 <CalendarPage
                   attendance={visibleCalendarAttendance}
-                  employees={visibleEmployees}
+                  employees={scopedEmployees}
                   selectedDate={selectedDate}
                   setSelectedDate={setSelectedDate}
                   navigate={navigate}
@@ -1517,6 +1776,8 @@ function App() {
                   error={visibleReportError}
                   onRetry={() => loadReportAttendance(false)}
                   onLoadMore={() => loadReportAttendance(true)}
+                  onDownload={downloadAttendanceReport}
+                  exporting={reportExportLoading}
                 />
               ) : (
                 <Navigate to="/" replace />
@@ -1572,7 +1833,7 @@ function App() {
         <footer className="footer">
           <span>PeopleHub UI prototype</span>
           <span>
-            Supporting records only · Biometric system remains primary
+            Employee records and attendance, organized in one place.
           </span>
         </footer>
       </main>
@@ -1588,9 +1849,24 @@ function App() {
           }
         />
       )}
+      {isAdmin && modal?.type === "employeeImport" && (
+        <EmployeeImportModal
+          onClose={() => setModal(null)}
+          onGetEmployees={getEmployeesForImport}
+          onSave={saveImportedEmployees}
+        />
+      )}
       {toast && (
-        <div className="toast">
-          <CircleCheck size={17} />
+        <div
+          className={`toast ${toastType === "error" ? "toast-error" : ""}`}
+          role={toastType === "error" ? "alert" : "status"}
+          aria-live="polite"
+        >
+          {toastType === "error" ? (
+            <CircleX size={17} />
+          ) : (
+            <CircleCheck size={17} />
+          )}
           {toast}
         </div>
       )}
@@ -1975,6 +2251,7 @@ function CreateStaffPage({ accounts, onCancel, onCreate }) {
               <label htmlFor="staff-account-role">Account role</label>
               <select
                 id="staff-account-role"
+                className="staff-account-role-select"
                 value={role}
                 onChange={(event) => setRole(event.target.value)}
                 required
@@ -2187,7 +2464,9 @@ function Dashboard({
 }) {
   const scoped = employees.filter(
     (e) =>
-      (isAdmin && activeGodown === "All godowns") || e.godown === activeGodown,
+      e.status === "Active" &&
+      ((isAdmin && activeGodown === "All godowns") ||
+        e.godown === activeGodown),
   );
   const todayRows = scoped.map(
     (e) =>
@@ -2232,10 +2511,12 @@ function Dashboard({
           <ShieldCheck size={17} />
         </div>
         <div>
-          <strong>Supporting record, not the source of truth</strong>
+          <strong>
+            Your team's employee records and attendance, organized in one place.
+          </strong>
           <span>
-            Use PeopleHub to make daily checking easier. Confirm attendance
-            against your organization's official timekeeping records.
+            Keep your employee register and daily attendance clear and easy to
+            manage.
           </span>
         </div>
       </div>
@@ -2255,7 +2536,7 @@ function Dashboard({
       </div>
       <div className="stats-grid dashboard-stats">
         <StatCard
-          label="Total employees"
+          label="Active employees"
           value={scoped.length}
           note="In selected view"
           icon={<Users size={19} />}
@@ -2326,10 +2607,12 @@ function Dashboard({
           </div>
           <div className="godown-grid">
             {godowns.map((name) => {
-              const members = employees.filter((e) => e.godown === name).length;
-              const present = employees.filter(
+              const activeMembers = employees.filter(
+                (e) => e.status === "Active" && e.godown === name,
+              );
+              const members = activeMembers.length;
+              const present = activeMembers.filter(
                 (e) =>
-                  e.godown === name &&
                   attendance.some(
                     (a) =>
                       a.employeeId === e.id &&
@@ -2354,7 +2637,7 @@ function Dashboard({
                   </div>
                   <strong>{name}</strong>
                   <div className="godown-meta">
-                    <span>{members} employees</span>
+                    <span>{members} active employees</span>
                     <span>{present} present</span>
                   </div>
                 </button>
@@ -2415,7 +2698,12 @@ function Employees({
   setSearch,
   onAdd,
   onEdit,
+  onDelete,
+  onImport,
+  onDownloadTemplate,
+  templateLoading,
   isAdmin,
+  isSuperAdmin,
   activeGodown,
   loading,
   error,
@@ -2433,9 +2721,14 @@ function Employees({
         subtitle="Maintain employee details and work assignments."
         action={
           isAdmin && (
-            <button className="btn btn-primary" onClick={onAdd}>
-              <Plus size={16} /> Add employee
-            </button>
+            <div className="employee-page-actions">
+              <button className="btn btn-secondary" onClick={onImport}>
+                <Upload size={16} /> Import employees
+              </button>
+              <button className="btn btn-primary" onClick={onAdd}>
+                <Plus size={16} /> Add employee
+              </button>
+            </div>
           )
         }
       />
@@ -2470,9 +2763,16 @@ function Employees({
             <strong>{filtered.length} employees</strong>
             <span> · {activeGodown}</span>
           </div>
-          <button className="icon-button" title="More actions">
-            <Download size={17} />
-          </button>
+          {isAdmin && (
+            <button
+              className="btn btn-secondary btn-small"
+              onClick={onDownloadTemplate}
+              disabled={templateLoading}
+            >
+              <Download size={17} />
+              {templateLoading ? "Preparing template..." : "Download template"}
+            </button>
+          )}
         </div>
         <div className="table-wrap">
           <table>
@@ -2499,7 +2799,10 @@ function Employees({
               )}
               {error && !loading && (
                 <tr>
-                  <td colSpan={isAdmin ? 5 : 3} className="empty-state">
+                  <td
+                    colSpan={isAdmin ? 5 : 3}
+                    className="empty-state"
+                  >
                     <div className="employee-load-error" role="alert">
                       <span>{error}</span>
                       <button
@@ -2542,6 +2845,16 @@ function Employees({
                         >
                           <Pencil size={16} />
                         </button>
+                        {isSuperAdmin && (
+                          <button
+                            className="icon-button row-action"
+                            onClick={() => onDelete(e)}
+                            title={`Delete ${e.name}`}
+                            aria-label={`Delete ${e.name}`}
+                          >
+                            <Trash2 size={16} />
+                          </button>
+                        )}
                       </td>
                     )}
                   </tr>
@@ -2589,6 +2902,10 @@ function Attendance({
     filter === "All statuses" ? true : r.attendance === filter,
   );
   const summary = (s) => rows.filter((r) => r.attendance === s).length;
+  const marked = rows.filter((row) => row.attendance !== "Not marked").length;
+  const completionPercent = rows.length
+    ? Math.round((marked / rows.length) * 100)
+    : 0;
   return (
     <>
       <PageHeading
@@ -2650,6 +2967,30 @@ function Attendance({
           </div>
         ))}
       </div>
+      <section className="panel attendance-completion">
+        <div className="panel-heading">
+          <div>
+            <h2>Attendance completion</h2>
+            <p>How many employees have an attendance entry for {date}</p>
+          </div>
+        </div>
+        <div className="completion-row">
+          <div className="completion-number">
+            {hasCurrentData ? marked : "…"}
+            <span> / {rows.length} marked</span>
+          </div>
+          <span className="completion-percent">
+            {hasCurrentData ? `${completionPercent}% complete` : "Updating"}
+          </span>
+        </div>
+        <div className="progress-track">
+          <div
+            style={{
+              width: `${hasCurrentData ? completionPercent : 0}%`,
+            }}
+          />
+        </div>
+      </section>
       <div className="panel table-panel">
         <div className="table-topline">
           <div>
@@ -2704,7 +3045,17 @@ function Attendance({
                     <select
                       className={`attendance-select ${statusClass(e.attendance)}`}
                       value={e.attendance}
-                      disabled={loading || saving || Boolean(error)}
+                      disabled={
+                        loading ||
+                        saving ||
+                        Boolean(error) ||
+                        (e.status !== "Active" && e.attendance === "Not marked")
+                      }
+                      title={
+                        e.status !== "Active" && e.attendance === "Not marked"
+                          ? "Inactive employees cannot receive new attendance records."
+                          : undefined
+                      }
                       onChange={(ev) => onMark(e.id, ev.target.value)}
                     >
                       <option disabled>Not marked</option>
@@ -2766,14 +3117,33 @@ function CalendarPage({
   ];
   while (cells.length % 7) cells.push(null);
   const visibleAttendance = attendance;
-  const countFor = (day) => {
-    if (!day) return 0;
+  const activeEmployeeIds = new Set(
+    employees
+      .filter((employee) => employee.status === "Active")
+      .map((employee) => String(employee.id)),
+  );
+  const markedEmployeesByDate = new Map();
+  for (const record of visibleAttendance) {
+    const employeeId = String(record.employeeId);
+    if (
+      !activeEmployeeIds.has(employeeId) ||
+      !statuses.includes(record.status)
+    ) {
+      continue;
+    }
+    if (!markedEmployeesByDate.has(record.date)) {
+      markedEmployeesByDate.set(record.date, new Set());
+    }
+    markedEmployeesByDate.get(record.date).add(employeeId);
+  }
+  const completionFor = (day) => {
+    if (!day) return "";
     const date = `${year}-${fmt(m + 1)}-${fmt(day)}`;
-    return visibleAttendance.filter(
-      (a) =>
-        a.date === date &&
-        employees.some((e) => String(e.id) === String(a.employeeId)),
-    ).length;
+    const markedCount = markedEmployeesByDate.get(date)?.size || 0;
+    if (!markedCount) return "";
+    return markedCount >= activeEmployeeIds.size
+      ? "fully-marked"
+      : "partially-marked";
   };
   const selectedRows = visibleAttendance.filter(
     (a) =>
@@ -2837,16 +3207,15 @@ function CalendarPage({
           <div className="calendar-grid">
             {cells.map((day, i) => {
               const date = day ? `${year}-${fmt(m + 1)}-${fmt(day)}` : "";
-              const n = countFor(day);
+              const completion = completionFor(day);
               return (
                 <button
                   key={i}
                   disabled={!day}
-                  className={`calendar-day ${date === selectedDate ? "chosen" : ""} ${date === today ? "today" : ""}`}
+                  className={`calendar-day ${completion} ${date === selectedDate ? "chosen" : ""} ${date === today ? "today" : ""}`}
                   onClick={() => day && setSelectedDate(date)}
                 >
                   <span>{day}</span>
-                  {n > 0 && <i />}
                 </button>
               );
             })}
@@ -2857,8 +3226,12 @@ function CalendarPage({
               Selected date
             </span>
             <span>
-              <i className="dot green-dot" />
-              Has attendance entries
+              <i className="calendar-legend-dot partial-dot" />
+              Partially marked
+            </span>
+            <span>
+              <i className="calendar-legend-dot full-dot" />
+              Fully marked
             </span>
           </div>
         </section>
@@ -2924,12 +3297,17 @@ function Reports({
   error,
   onRetry,
   onLoadMore,
+  onDownload,
+  exporting,
 }) {
-  const rows = attendance.filter(
-    (a) =>
-      (resultsAreStale || (a.date >= from && a.date <= to)) &&
-      employees.some((e) => String(e.id) === String(a.employeeId)),
-  );
+  const rows = resultsAreStale
+    ? []
+    : attendance.filter(
+        (a) =>
+          a.date >= from &&
+          a.date <= to &&
+          statuses.includes(a.status),
+      );
   return (
     <>
       <PageHeading
@@ -2937,9 +3315,30 @@ function Reports({
         title="Reports"
         subtitle="Review attendance records over a selected period."
         action={
-          <button className="btn btn-secondary" onClick={() => window.print()}>
-            <Download size={16} /> Print report
-          </button>
+          <div className="employee-page-actions">
+            <button
+              className="btn btn-primary"
+              onClick={onDownload}
+              disabled={
+                exporting ||
+                loading ||
+                resultsAreStale ||
+                Boolean(error) ||
+                !isAttendanceDate(from) ||
+                !isAttendanceDate(to) ||
+                from > to
+              }
+            >
+              <Download size={16} />
+              {exporting ? "Preparing Excel..." : "Download Excel"}
+            </button>
+            <button
+              className="btn btn-secondary"
+              onClick={() => window.print()}
+            >
+              <Download size={16} /> Print report
+            </button>
+          </div>
         }
       />
       {error && (
@@ -2986,7 +3385,13 @@ function Reports({
           <StatCard
             key={s}
             label={s}
-            value={rows.filter((a) => a.status === s).length}
+            value={
+              error
+                ? "—"
+                : loading || resultsAreStale
+                  ? "…"
+                  : rows.filter((a) => a.status === s).length
+            }
             note="Loaded records in selected period"
             icon={<ClipboardCheck size={18} />}
             tone={statusTone(s)}
@@ -3001,13 +3406,15 @@ function Reports({
               {activeGodown} · {from} to {to}
             </p>
           </div>
-          <span className="status-badge">{rows.length} loaded</span>
+          <span className="status-badge">
+            {loading || resultsAreStale ? "Updating" : `${rows.length} loaded`}
+          </span>
         </div>
         {resultsAreStale && (
           <div className="data-refresh-indicator report-refresh" role="status" aria-live="polite">
             {loading
-              ? `Showing previous results from ${previousFrom} to ${previousTo} while updating the selected range.`
-              : `Showing previous results from ${previousFrom} to ${previousTo}; they are not results for the selected range.`}
+              ? `Loading attendance from ${from} to ${to}. Previous results are hidden until this range is ready.`
+              : `The selected range could not be loaded. Previous results from ${previousFrom} to ${previousTo} are hidden.`}
           </div>
         )}
         <div className="table-wrap">
@@ -3022,10 +3429,10 @@ function Reports({
             </thead>
             <tbody>
               {rows.map((a) => {
-                  const employee = employees.find(
-                    (item) => String(item.id) === String(a.employeeId),
-                  );
-                  return (
+                const employee = employees.find(
+                  (item) => String(item.id) === String(a.employeeId),
+                );
+                return (
                   <tr key={a.id}>
                     <td>{a.date}</td>
                     <td>
@@ -3040,8 +3447,8 @@ function Reports({
                       </span>
                     </td>
                   </tr>
-                  );
-                })}
+                );
+              })}
               {loading && rows.length === 0 && (
                 <tr>
                   <td colSpan="4" className="empty-state">
@@ -3344,6 +3751,319 @@ function SettingsPage({ isAdmin, isSuperAdmin, activeGodown }) {
   );
 }
 
+function EmployeeImportModal({ onClose, onGetEmployees, onSave }) {
+  const [file, setFile] = useState(null);
+  const fileInputRef = useRef(null);
+  const [preview, setPreview] = useState(null);
+  const [processing, setProcessing] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState("");
+  const [result, setResult] = useState(null);
+  const previewLimit = 100;
+  const { validRows, duplicateCount, validationFailureCount } = useMemo(() => {
+    const counts = {
+      validRows: [],
+      duplicateCount: 0,
+      validationFailureCount: 0,
+    };
+    for (const row of preview || []) {
+      if (row.errors.length > 0) {
+        counts.validationFailureCount += 1;
+      } else if (row.duplicate) {
+        counts.duplicateCount += 1;
+      } else {
+        counts.validRows.push(row);
+      }
+    }
+    return counts;
+  }, [preview]);
+  const busy = processing || saving;
+
+  const parseFile = async (selectedFile) => {
+    const existingEmployees = await onGetEmployees();
+    const fileBuffer = await selectedFile.arrayBuffer();
+    const rows = await runEmployeeWorkbookWorker(
+      { type: "parse", fileBuffer, existingEmployees },
+      [fileBuffer],
+    );
+    setPreview(rows);
+    return rows;
+  };
+
+  const chooseFile = async (event) => {
+    const selectedFile = event.target.files?.[0] || null;
+    event.target.value = "";
+    if (!selectedFile) return;
+    setFile(selectedFile);
+    setPreview(null);
+    setResult(null);
+    setError("");
+    if (!/\.xlsx$/i.test(selectedFile.name)) {
+      setError("Unsupported file. Choose an Excel .xlsx workbook.");
+      return;
+    }
+
+    setProcessing(true);
+    try {
+      await parseFile(selectedFile);
+    } catch (parseError) {
+      setError(parseError.message || "Could not read this Excel workbook.");
+    } finally {
+      setProcessing(false);
+    }
+  };
+
+  const save = async () => {
+    if (!file || busy || result?.complete || validRows.length === 0) return;
+    setSaving(true);
+    setError("");
+    setResult(null);
+    let currentCounts = { duplicateCount, validationFailureCount };
+    let currentEligibleCount = validRows.length;
+    try {
+      const rows = await parseFile(file);
+      const eligibleRows = rows.filter(
+        (row) => row.errors.length === 0 && !row.duplicate,
+      );
+      currentEligibleCount = eligibleRows.length;
+      currentCounts = rows.reduce(
+        (counts, row) => {
+          if (row.errors.length > 0) {
+            counts.validationFailureCount += 1;
+          } else if (row.duplicate) {
+            counts.duplicateCount += 1;
+          }
+          return counts;
+        },
+        { duplicateCount: 0, validationFailureCount: 0 },
+      );
+      if (eligibleRows.length === 0) {
+        setResult({
+          importedCount: 0,
+          eligibleCount: 0,
+          complete: true,
+          ...currentCounts,
+        });
+        return;
+      }
+      const importedCount = await onSave(
+        eligibleRows.map((row) => row.employee),
+      );
+      if (importedCount > 0) {
+        setFile(null);
+        setPreview(null);
+        setResult(null);
+        setError("");
+        if (fileInputRef.current) fileInputRef.current.value = "";
+      } else {
+        setResult({
+          importedCount,
+          eligibleCount: eligibleRows.length,
+          complete: true,
+          ...currentCounts,
+        });
+      }
+    } catch (saveError) {
+      setError(saveError.message || "Could not complete the employee import.");
+      setResult({
+        importedCount: Number(saveError.importedCount) || 0,
+        eligibleCount: currentEligibleCount,
+        complete: false,
+        ...currentCounts,
+      });
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <div
+      className="modal-backdrop"
+      onMouseDown={(event) =>
+        !busy && event.target === event.currentTarget && onClose()
+      }
+    >
+      <section
+        className="modal employee-import-modal"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="employee-import-title"
+      >
+        <div className="modal-head">
+          <div>
+            <div className="eyebrow">EMPLOYEE REGISTER</div>
+            <h2 id="employee-import-title">Import employees</h2>
+          </div>
+          <button
+            type="button"
+            className="icon-button"
+            onClick={onClose}
+            disabled={busy}
+            aria-label="Close employee import"
+          >
+            <X size={19} />
+          </button>
+        </div>
+        <div className="modal-body employee-import-body">
+          <label>
+            Excel workbook (.xlsx)
+            <input
+              ref={fileInputRef}
+              className="employee-import-file"
+              type="file"
+              accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+              onChange={chooseFile}
+              disabled={busy}
+            />
+            <span className="field-hint">
+              Use Name, or First Name and Second Name with an optional Third
+              Name, plus Role, Godown, and Status.
+            </span>
+          </label>
+          {file && <div className="employee-import-filename">{file.name}</div>}
+          {processing && (
+            <div className="employee-import-message" role="status">
+              Reading and validating workbook...
+            </div>
+          )}
+          {error && (
+            <div className="auth-feedback error" role="alert">
+              {error}
+            </div>
+          )}
+          {preview && (
+            <>
+              <div className="employee-import-counts" aria-live="polite">
+                <span>
+                  <strong>{validRows.length}</strong> ready to import
+                </span>
+                <span>
+                  <strong>{duplicateCount}</strong> duplicates to skip
+                </span>
+                <span>
+                  <strong>{validationFailureCount}</strong> validation failures
+                </span>
+              </div>
+              {preview.length === 0 ? (
+                <div className="employee-import-message">
+                  No employee rows were found below the column headings.
+                </div>
+              ) : (
+                <>
+                  {result?.complete && (
+                    <div className="employee-import-result" role="status">
+                      <strong>
+                        Successfully imported {result.importedCount}{" "}
+                        {result.importedCount === 1 ? "employee" : "employees"}.
+                      </strong>{" "}
+                      Skipped{" "}
+                      {result.duplicateCount ?? duplicateCount} duplicates.{" "}
+                      {result.validationFailureCount ?? validationFailureCount}{" "}
+                      rows had validation failures.
+                    </div>
+                  )}
+                  {result && !result.complete && (
+                    <div className="employee-import-result" role="status">
+                      <strong>
+                        Successfully imported {result.importedCount}{" "}
+                        {result.importedCount === 1 ? "employee" : "employees"}.
+                      </strong>{" "}
+                      {Math.max(
+                        result.eligibleCount - result.importedCount,
+                        0,
+                      )}{" "}
+                      eligible{" "}
+                      {result.eligibleCount - result.importedCount === 1
+                        ? "employee was"
+                        : "employees were"}{" "}
+                      not imported because saving stopped.{" "}
+                      {result.duplicateCount ?? duplicateCount} duplicates
+                      were skipped and{" "}
+                      {result.validationFailureCount ?? validationFailureCount}{" "}
+                      rows had validation failures.
+                    </div>
+                  )}
+                  <div className="employee-import-preview-wrap">
+                    <table className="employee-import-preview">
+                      <thead>
+                        <tr>
+                          <th>ROW</th>
+                          <th>NAME</th>
+                          <th>ROLE</th>
+                          <th>GODOWN</th>
+                          <th>STATUS</th>
+                          <th>CHECK</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {preview.slice(0, previewLimit).map((row) => (
+                          <tr key={row.rowNumber}>
+                            <td>{row.rowNumber}</td>
+                            <td>{row.employee.name || "—"}</td>
+                            <td>{row.employee.role}</td>
+                            <td>{row.employee.godown}</td>
+                            <td>{row.employee.status}</td>
+                            <td>
+                              {row.errors.length > 0 ? (
+                                <span className="employee-import-error">
+                                  {row.errors.join(" ")}
+                                </span>
+                              ) : row.duplicate === "existing" ? (
+                                <span className="employee-import-warning">
+                                  Existing employee name; skipped.
+                                </span>
+                              ) : row.duplicate === "upload" ? (
+                                <span className="employee-import-warning">
+                                  Duplicate name in this file; later row
+                                  skipped.
+                                </span>
+                              ) : (
+                                <span className="employee-import-ready">Ready</span>
+                              )}
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                  {preview.length > previewLimit && (
+                    <div className="field-hint">
+                      Showing the first {previewLimit} of {preview.length} rows.
+                      All rows are validated.
+                    </div>
+                  )}
+                </>
+              )}
+            </>
+          )}
+        </div>
+        <div className="modal-foot">
+          <button
+            type="button"
+            className="btn btn-secondary"
+            onClick={onClose}
+            disabled={busy}
+          >
+            Close
+          </button>
+          <button
+            type="button"
+            className="btn btn-primary"
+            onClick={save}
+            disabled={busy || result?.complete || validRows.length === 0}
+          >
+            {saving
+              ? "Importing..."
+              : result && !result.complete
+                ? `Retry import (${validRows.length})`
+                : `Import ${validRows.length} employees`}
+          </button>
+        </div>
+      </section>
+    </div>
+  );
+}
+
 function EmployeeModal({
   employee,
   onClose,
@@ -3595,7 +4315,7 @@ function statusClass(s = "") {
 function statusTone(s) {
   return (
     { Present: "green", Absent: "red", Sick: "orange", "On Leave": "purple" }[
-      s
+    s
     ] || "blue"
   );
 }

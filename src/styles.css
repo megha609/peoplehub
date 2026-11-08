@@ -26,7 +26,11 @@ body {
   margin: 0;
   min-width: 320px;
   background:
-    radial-gradient(ellipse at 86% 0%, rgb(213 235 224 / 28%), transparent 27rem),
+    radial-gradient(
+      ellipse at 86% 0%,
+      rgb(213 235 224 / 28%),
+      transparent 27rem
+    ),
     #f3f7f5;
 }
 
@@ -87,7 +91,9 @@ select:focus-visible {
 
 .brand strong {
   display: block;
-  font: 800 19px Manrope, sans-serif;
+  font:
+    800 19px Manrope,
+    sans-serif;
   letter-spacing: -0.7px;
   color: #fff;
 }
@@ -126,7 +132,10 @@ select:focus-visible {
   font-size: 12px;
   font-weight: 600;
   margin: 3px 0;
-  transition: background 160ms ease, color 160ms ease, transform 160ms ease;
+  transition:
+    background 160ms ease,
+    color 160ms ease,
+    transform 160ms ease;
 }
 
 .nav-item:hover,
@@ -184,7 +193,9 @@ select:focus-visible {
   text-align: left;
   font-size: 11px;
   font-weight: 600;
-  transition: background 160ms ease, color 160ms ease;
+  transition:
+    background 160ms ease,
+    color 160ms ease;
 }
 
 .godown-link span {
@@ -358,7 +369,9 @@ select:focus-visible {
   width: 36px;
   height: 36px;
   border-radius: 9px;
-  transition: background 160ms ease, color 160ms ease;
+  transition:
+    background 160ms ease,
+    color 160ms ease;
 }
 
 .icon-button:hover {
@@ -413,7 +426,9 @@ select:focus-visible {
 }
 
 .page-heading h1 {
-  font: 800 28px Manrope, sans-serif;
+  font:
+    800 28px Manrope,
+    sans-serif;
   letter-spacing: -1px;
   margin: 0;
   color: var(--navy);
@@ -438,7 +453,10 @@ select:focus-visible {
   font-size: 11px;
   font-weight: 700;
   white-space: nowrap;
-  transition: background 160ms ease, box-shadow 160ms ease, transform 160ms ease;
+  transition:
+    background 160ms ease,
+    box-shadow 160ms ease,
+    transform 160ms ease;
 }
 
 .btn:hover {
@@ -531,7 +549,9 @@ select:focus-visible {
 
 .section-title-row h2,
 .panel-heading h2 {
-  font: 700 15px Manrope, sans-serif;
+  font:
+    700 15px Manrope,
+    sans-serif;
   margin: 0;
   color: #203b42;
 }
@@ -587,7 +607,10 @@ select:focus-visible {
   min-width: 0;
   position: relative;
   box-shadow: 0 5px 16px rgb(32 66 55 / 3%);
-  transition: border-color 160ms ease, transform 160ms ease, box-shadow 160ms ease;
+  transition:
+    border-color 160ms ease,
+    transform 160ms ease,
+    box-shadow 160ms ease;
 }
 
 .stat-card.clickable:hover {
@@ -637,7 +660,9 @@ select:focus-visible {
 }
 
 .stat-value {
-  font: 800 27px Manrope, sans-serif;
+  font:
+    800 27px Manrope,
+    sans-serif;
   color: #183541;
   margin-top: 6px;
   letter-spacing: -0.8px;
@@ -691,7 +716,10 @@ select:focus-visible {
   background: #fff;
   text-align: left;
   min-width: 0;
-  transition: border-color 160ms ease, background 160ms ease, transform 160ms ease;
+  transition:
+    border-color 160ms ease,
+    background 160ms ease,
+    transform 160ms ease;
 }
 
 .godown-card:hover {
@@ -742,12 +770,16 @@ select:focus-visible {
 }
 
 .completion-number {
-  font: 800 22px Manrope, sans-serif;
+  font:
+    800 22px Manrope,
+    sans-serif;
   color: #1e4144;
 }
 
 .completion-number span {
-  font: 400 10px "DM Sans", sans-serif;
+  font:
+    400 10px "DM Sans",
+    sans-serif;
   color: #81938c;
 }
 
@@ -1140,7 +1172,9 @@ tbody tr:hover {
 .mini-stat strong {
   margin-left: auto;
   color: #29444a;
-  font: 700 14px Manrope, sans-serif;
+  font:
+    700 14px Manrope,
+    sans-serif;
 }
 
 .mini-dot {
@@ -1246,7 +1280,9 @@ tbody tr:hover {
 }
 
 .calendar-head h2 {
-  font: 700 15px Manrope, sans-serif;
+  font:
+    700 15px Manrope,
+    sans-serif;
   color: #29434a;
   margin: 0;
 }
@@ -1282,12 +1318,14 @@ tbody tr:hover {
   color: #4b6259;
   font-size: 10px;
   text-align: center;
-  transition: background 120ms ease, border-color 120ms ease;
+  transition:
+    background 120ms ease,
+    border-color 120ms ease;
 }
 
 .calendar-day:not(:disabled):hover {
   border-color: #b8dcca;
-  background: #eef7f1;
+  background: #f0f4f6;
 }
 
 .calendar-day:disabled {
@@ -1296,10 +1334,37 @@ tbody tr:hover {
 }
 
 .calendar-day.chosen {
-  background: #e3f3e9;
-  color: #176f56;
-  border-color: #c4e3d0;
+  color: #1769aa;
+  border: 2px solid #2878c7;
   font-weight: 700;
+}
+
+.calendar-day.partially-marked,
+.calendar-day.chosen.partially-marked {
+  background: #dff2e4;
+  color: #24583a;
+}
+
+.calendar-day.fully-marked {
+  background: #62bd7c;
+  color: #174b2b;
+}
+
+.calendar-day:not(:disabled).partially-marked:hover {
+  background: #dff2e4;
+}
+
+.calendar-day:not(:disabled).fully-marked:hover {
+  background: #62bd7c;
+}
+
+.calendar-day.chosen.partially-marked:hover {
+  background: #dff2e4;
+}
+
+.calendar-day.chosen.fully-marked,
+.calendar-day.chosen.fully-marked:hover {
+  background: #62bd7c;
 }
 
 .calendar-day.today span {
@@ -1308,20 +1373,27 @@ tbody tr:hover {
   text-underline-offset: 3px;
 }
 
-.calendar-day i {
-  position: absolute;
-  bottom: 7px;
-  left: 50%;
-  width: 5px;
-  height: 5px;
-  border-radius: 50%;
-  background: #38a775;
-  transform: translateX(-50%);
+.calendar-legend-dot {
+  display: inline-block;
+  width: 10px;
+  height: 8px;
+  border-radius: 2px;
+}
+
+.calendar-legend-dot.partial-dot {
+  background: #dff2e4;
+  border: 1px solid #d5e8d9;
+}
+
+.calendar-legend-dot.full-dot {
+  background: #62bd7c;
+  border: 1px solid #8fc99d;
 }
 
 .calendar-legend {
   padding-top: 13px;
   border-top: 1px solid #edf2ef;
+  flex-wrap: wrap;
 }
 
 .selected-day-panel {
@@ -1329,7 +1401,9 @@ tbody tr:hover {
 }
 
 .selected-day-panel h2 {
-  font: 700 17px/1.35 Manrope, sans-serif;
+  font:
+    700 17px/1.35 Manrope,
+    sans-serif;
   color: #203e42;
   margin: 0 0 19px;
 }
@@ -1345,7 +1419,9 @@ tbody tr:hover {
 
 .selected-count strong {
   color: #1b765c;
-  font: 800 27px Manrope, sans-serif;
+  font:
+    800 27px Manrope,
+    sans-serif;
 }
 
 .selected-count span {
@@ -1483,7 +1559,9 @@ tbody tr:hover {
 }
 
 .settings-card h3 {
-  font: 700 13px Manrope, sans-serif;
+  font:
+    700 13px Manrope,
+    sans-serif;
   color: #2b4748;
   margin: 0;
 }
@@ -1537,7 +1615,9 @@ tbody tr:hover {
 }
 
 .modal-head h2 {
-  font: 700 20px Manrope, sans-serif;
+  font:
+    700 20px Manrope,
+    sans-serif;
   color: #203e43;
   margin: 0;
 }
@@ -1594,6 +1674,114 @@ tbody tr:hover {
   border-top: 1px solid #edf2ef;
 }
 
+.employee-page-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.employee-import-modal {
+  width: min(100%, 980px);
+}
+
+.employee-import-body {
+  min-height: 180px;
+}
+
+.employee-import-file {
+  height: auto !important;
+  min-height: 39px;
+  padding: 4px !important;
+  cursor: pointer;
+}
+
+.employee-import-file::file-selector-button {
+  height: 29px;
+  margin-right: 10px;
+  padding: 0 12px;
+  border: 1px solid #dce8e2;
+  border-radius: 8px;
+  background: #fff;
+  color: #536b65;
+  font:
+    700 10px Manrope,
+    sans-serif;
+  cursor: pointer;
+  transition:
+    background 160ms ease,
+    border-color 160ms ease,
+    transform 160ms ease;
+}
+
+.employee-import-file::file-selector-button:hover {
+  transform: translateY(-1px);
+  background: #f6faf8;
+  border-color: #c6dbd0;
+}
+
+.employee-import-filename,
+.employee-import-message,
+.employee-import-result {
+  color: #536b65;
+  font-size: 10px;
+  line-height: 1.5;
+}
+
+.employee-import-result {
+  padding: 10px 12px;
+  border: 1px solid #dceee4;
+  border-radius: 8px;
+  background: #f1f8f4;
+}
+
+.employee-import-counts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 18px;
+  color: #657b71;
+  font-size: 10px;
+}
+
+.employee-import-counts strong {
+  color: #29434a;
+}
+
+.employee-import-preview-wrap {
+  max-height: 360px;
+  overflow: auto;
+  border: 1px solid #edf2ef;
+  border-radius: 8px;
+}
+
+.employee-import-preview {
+  min-width: 760px;
+}
+
+.employee-import-preview th {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+}
+
+.employee-import-preview td {
+  padding: 9px 12px;
+  color: #526a60;
+  font-size: 10px;
+}
+
+.employee-import-error {
+  color: #b44242;
+}
+
+.employee-import-warning {
+  color: #9a6b10;
+}
+
+.employee-import-ready {
+  color: #14765f;
+  font-weight: 700;
+}
+
 .footer {
   display: flex;
   align-items: center;
@@ -1625,6 +1813,15 @@ tbody tr:hover {
 
 .toast svg {
   color: var(--green);
+}
+
+.toast.toast-error {
+  border-color: #efcfcc;
+  color: #983d37;
+}
+
+.toast.toast-error svg {
+  color: #bd5149;
 }
 
 .mobile-menu,
@@ -1879,7 +2076,11 @@ tbody tr:hover {
   padding: 34px clamp(35px, 6vw, 88px) 25px;
   color: #f3faf6;
   background:
-    radial-gradient(ellipse at 82% 78%, rgb(33 139 103 / 32%), transparent 29rem),
+    radial-gradient(
+      ellipse at 82% 78%,
+      rgb(33 139 103 / 32%),
+      transparent 29rem
+    ),
     linear-gradient(145deg, #102b3b 6%, #123a43 57%, #14564d 125%);
 }
 
@@ -1897,7 +2098,9 @@ tbody tr:hover {
   height: 580px;
   right: -305px;
   top: 16%;
-  box-shadow: 0 0 0 45px rgb(224 249 234 / 2%), 0 0 0 95px rgb(224 249 234 / 2%);
+  box-shadow:
+    0 0 0 45px rgb(224 249 234 / 2%),
+    0 0 0 95px rgb(224 249 234 / 2%);
 }
 
 .auth-story::after {
@@ -1922,7 +2125,9 @@ tbody tr:hover {
 .auth-brand strong {
   display: block;
   color: #fff;
-  font: 800 20px Manrope, sans-serif;
+  font:
+    800 20px Manrope,
+    sans-serif;
   letter-spacing: -0.7px;
 }
 
@@ -1956,7 +2161,9 @@ tbody tr:hover {
   max-width: 470px;
   margin: 22px 0 14px;
   color: #f3faf6;
-  font: 800 clamp(34px, 4vw, 51px)/1.12 Manrope, sans-serif;
+  font:
+    800 clamp(34px, 4vw, 51px)/1.12 Manrope,
+    sans-serif;
   letter-spacing: -2px;
 }
 
@@ -2022,7 +2229,11 @@ tbody tr:hover {
   min-height: 100vh;
   padding: 48px;
   background:
-    radial-gradient(ellipse at 90% 8%, rgb(230 243 235 / 52%), transparent 27rem),
+    radial-gradient(
+      ellipse at 90% 8%,
+      rgb(230 243 235 / 52%),
+      transparent 27rem
+    ),
     #fbfdfb;
 }
 
@@ -2045,7 +2256,9 @@ tbody tr:hover {
 .auth-heading h2 {
   margin: 0;
   color: #173642;
-  font: 800 26px/1.25 Manrope, sans-serif;
+  font:
+    800 26px/1.25 Manrope,
+    sans-serif;
   letter-spacing: -0.8px;
 }
 
@@ -2079,7 +2292,9 @@ tbody tr:hover {
   border-radius: 9px;
   background: #fff;
   color: #8ca097;
-  transition: border-color 150ms ease, box-shadow 150ms ease;
+  transition:
+    border-color 150ms ease,
+    box-shadow 150ms ease;
 }
 
 .auth-input-wrap:focus-within {
@@ -2299,7 +2514,9 @@ tbody tr:hover {
 .registration-section-heading h2 {
   margin: 0;
   color: #2b4748;
-  font: 700 14px Manrope, sans-serif;
+  font:
+    700 14px Manrope,
+    sans-serif;
 }
 
 .registration-section-heading p {
@@ -2343,6 +2560,24 @@ tbody tr:hover {
 
 .registration-access .auth-field {
   width: 100%;
+}
+
+.staff-account-role-select {
+  width: 100%;
+  height: 43px;
+  padding: 0 12px;
+  border: 1px solid #dce8e1;
+  border-radius: 9px;
+  outline: 0;
+  background: #fff;
+  color: #345148;
+  font-size: 11px;
+  font-weight: 400;
+}
+
+.staff-account-role-select:focus {
+  border-color: #7fbea0;
+  box-shadow: 0 0 0 3px rgb(54 157 118 / 10%);
 }
 
 .registration-passwords {
@@ -2423,7 +2658,11 @@ tbody tr:hover {
     min-height: 100vh;
     padding: 20px 14px;
     background:
-      radial-gradient(ellipse at 90% 0%, rgb(218 238 224 / 45%), transparent 25rem),
+      radial-gradient(
+        ellipse at 90% 0%,
+        rgb(218 238 224 / 45%),
+        transparent 25rem
+      ),
       #f5f9f6;
   }
 
@@ -2452,7 +2691,9 @@ tbody tr:hover {
 
   .auth-mobile-brand strong {
     color: #163842;
-    font: 800 17px Manrope, sans-serif;
+    font:
+      800 17px Manrope,
+      sans-serif;
   }
 
   .auth-heading h2 {
