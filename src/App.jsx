@@ -83,7 +83,7 @@ import { auth, db, staffAccountAuth } from "./firebase";
 
 const fmt = (n) => String(n).padStart(2, "0");
 const today = getLocalDateString();
-const SUPER_ADMIN_UIDS = ["Pinc0L99DjUKZ0eYA1IzJB2GKPd2"];
+const SUPER_ADMIN_UIDS = ["ZYa131iL8AYn5fAZauhDH5R3ody2"];
 const statuses = ["Present", "Absent", "Sick", "On Leave", "Overtime"];
 const attendancePageSize = 50;
 const titleMap = {
@@ -3613,11 +3613,11 @@ function Reports({
   const rows = resultsAreStale
     ? []
     : attendance.filter(
-        (a) =>
-          a.date >= from &&
-          a.date <= to &&
-          statuses.includes(a.status),
-      );
+      (a) =>
+        a.date >= from &&
+        a.date <= to &&
+        statuses.includes(a.status),
+    );
   return (
     <>
       <PageHeading
@@ -4532,10 +4532,10 @@ function formatEmployeeRegistrationDate(value) {
   return Number.isNaN(date.getTime())
     ? "Not available"
     : date.toLocaleDateString("en-GB", {
-        day: "numeric",
-        month: "short",
-        year: "numeric",
-      });
+      day: "numeric",
+      month: "short",
+      year: "numeric",
+    });
 }
 
 function firstDayOfMonth(date) {
