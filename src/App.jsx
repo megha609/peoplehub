@@ -1,11 +1,13 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
+  Link,
   NavLink,
   Navigate,
   Routes,
   Route,
   useLocation,
   useNavigate,
+  useParams,
 } from "react-router-dom";
 import {
   LayoutDashboard,
@@ -87,6 +89,7 @@ const attendancePageSize = 50;
 const titleMap = {
   "/": "Overview",
   "/employees": "Employee register",
+  "/employees/:employeeId": "Employee profile",
   "/attendance": "Daily attendance",
   "/calendar": "Attendance calendar",
   "/reports": "Reports",
@@ -1650,7 +1653,12 @@ function App() {
             </button>
             <div className="breadcrumb">
               PeopleHub <ChevronRight size={14} />{" "}
-              <strong>{titleMap[location.pathname] || "Workspace"}</strong>
+              <strong>
+                {titleMap[location.pathname] ||
+                  (location.pathname.startsWith("/employees/")
+                    ? "Employee profile"
+                    : "Workspace")}
+              </strong>
             </div>
           </div>
           <div className="top-actions">
@@ -1721,6 +1729,10 @@ function App() {
                   onRetry={loadEmployees}
                 />
               }
+            />
+            <Route
+              path="/employees/:employeeId"
+              element={<EmployeeProfile currentUser={currentUser} />}
             />
             <Route
               path="/attendance"
@@ -2692,6 +2704,294 @@ function Dashboard({
   );
 }
 
+function EmployeeProfile({ currentUser }) {
+  const { employeeId = "" } = useParams();
+  const navigate = useNavigate();
+  const [employee, setEmployee] = useState(null);
+  const [records, setRecords] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
+  const [reloadKey, setReloadKey] = useState(0);
+  const [month, setMonth] = useState(() => firstDayOfMonth(new Date()));
+
+  useEffect(() => {
+    let active = true;
+    setLoading(true);
+    setError("");
+    setEmployee(null);
+    setRecords([]);
+
+    const employeeRequest = getDoc(doc(db, "employees", employeeId))
+      .then((snapshot) =>
+        snapshot.exists()
+          ? { id: snapshot.id, ...snapshot.data() }
+          : null,
+      )
+      .catch((readError) => {
+        if (readError.code === "permission-denied") return null;
+        throw readError;
+      });
+    const attendanceConstraints = [
+      where("employeeId", "==", String(employeeId)),
+    ];
+    if (currentUser.role === "Staff") {
+      attendanceConstraints.push(
+        where("godown", "==", currentUser.godown),
+      );
+    }
+
+    Promise.all([
+      employeeRequest,
+      getDocs(query(collection(db, "attendance"), ...attendanceConstraints)),
+    ])
+      .then(([employeeRecord, attendanceSnapshot]) => {
+        if (!active) return;
+        const history = attendanceSnapshot.docs
+          .map((attendanceDoc) => ({
+            id: attendanceDoc.id,
+            ...attendanceDoc.data(),
+          }))
+          .filter(
+            (record) =>
+              String(record.employeeId) === String(employeeId) &&
+              statuses.includes(record.status) &&
+              isAttendanceDate(record.date),
+          );
+        const historicalIdentity = [...history].sort((left, right) =>
+          right.date.localeCompare(left.date),
+        )[0];
+        if (employeeRecord) {
+          setEmployee(employeeRecord);
+        } else if (historicalIdentity) {
+          setEmployee({
+            id: String(employeeId),
+            name: historicalIdentity.employeeName || "Former employee",
+            role: historicalIdentity.role || "Not recorded",
+            godown: historicalIdentity.godown || "Not recorded",
+            status: "Deleted employee record",
+            createdAt: null,
+            historicalSnapshot: true,
+          });
+        } else {
+          setError(
+            "This employee profile is unavailable, or no historical attendance is accessible for your account.",
+          );
+        }
+        setRecords(history);
+      })
+      .catch((loadError) => {
+        if (!active) return;
+        console.error("Could not load employee profile history.", loadError);
+        setError(
+          loadError.code === "permission-denied"
+            ? "You do not have permission to view this employee profile or its attendance history."
+            : "Could not load this employee profile. Check your connection and try again.",
+        );
+      })
+      .finally(() => {
+        if (active) setLoading(false);
+      });
+
+    return () => {
+      active = false;
+    };
+  }, [
+    currentUser.godown,
+    currentUser.id,
+    currentUser.role,
+    employeeId,
+    reloadKey,
+  ]);
+
+  useEffect(() => {
+    setMonth(firstDayOfMonth(new Date()));
+  }, [employeeId]);
+
+  const year = month.getFullYear();
+  const monthIndex = month.getMonth();
+  const firstWeekday = new Date(year, monthIndex, 1).getDay();
+  const daysInMonth = new Date(year, monthIndex + 1, 0).getDate();
+  const calendarDays = [
+    ...Array(firstWeekday).fill(null),
+    ...Array.from({ length: daysInMonth }, (_, index) => index + 1),
+  ];
+  while (calendarDays.length % 7) calendarDays.push(null);
+
+  const recordsByDate = new Map(
+    records.map((record) => [record.date, record]),
+  );
+  const summary = statuses.map((status) => ({
+    status,
+    count: records.filter((record) => record.status === status).length,
+  }));
+  const registeredDate = employee?.createdAt
+    ? formatEmployeeRegistrationDate(employee.createdAt)
+    : "Not available";
+
+  return (
+    <>
+      <PageHeading
+        eyebrow="EMPLOYEE PROFILE"
+        title={employee?.name || "Employee profile"}
+        subtitle="Employee details and attendance history."
+        action={
+          <button
+            type="button"
+            className="btn btn-secondary"
+            onClick={() => navigate("/employees")}
+          >
+            <Users size={16} /> Employee register
+          </button>
+        }
+      />
+      {loading && (
+        <div className="data-refresh-indicator" role="status" aria-live="polite">
+          Loading employee profile and attendance history…
+        </div>
+      )}
+      {error && (
+        <div className="employee-load-error employee-load-error-banner" role="alert">
+          <span>{error}</span>
+          <button
+            type="button"
+            className="btn btn-secondary btn-small"
+            onClick={() => setReloadKey((key) => key + 1)}
+          >
+            Retry
+          </button>
+        </div>
+      )}
+      {employee && (
+        <>
+          <section className="panel employee-profile-details">
+            <div className="employee-profile-identity">
+              <div className="avatar">{initials(employee.name)}</div>
+              <div>
+                <h2>{employee.name}</h2>
+                <span>
+                  {employee.historicalSnapshot
+                    ? "Identity recovered from historical attendance"
+                    : `EMP-${String(employee.id).padStart(4, "0")}`}
+                </span>
+              </div>
+            </div>
+            <dl className="employee-profile-fields">
+              <div>
+                <dt>Employee reference</dt>
+                <dd>EMP-{String(employee.id).padStart(4, "0")}</dd>
+              </div>
+              <div>
+                <dt>Job role</dt>
+                <dd>{employee.role || "Not available"}</dd>
+              </div>
+              <div>
+                <dt>Assigned godown</dt>
+                <dd>{employee.godown || "Not available"}</dd>
+              </div>
+              <div>
+                <dt>Employment status</dt>
+                <dd>{employee.status || "Not available"}</dd>
+              </div>
+              <div>
+                <dt>Date registered</dt>
+                <dd>{registeredDate}</dd>
+              </div>
+            </dl>
+          </section>
+
+          <section className="employee-history-summary">
+            {summary.map(({ status, count }) => (
+              <div className="panel employee-history-stat" key={status}>
+                <span className={`mini-dot ${status.toLowerCase().replace(" ", "-")}`} />
+                <span>{status}</span>
+                <strong>{loading ? "…" : count}</strong>
+              </div>
+            ))}
+            <div className="panel employee-history-stat total-history-stat">
+              <span>Total attendance records</span>
+              <strong>{loading ? "…" : records.length}</strong>
+            </div>
+          </section>
+
+          {error && records.length === 0 ? null : (
+            <section className="panel employee-history-calendar">
+              <div className="calendar-head">
+                <button
+                  type="button"
+                  className="icon-button"
+                  aria-label="Previous month"
+                  onClick={() =>
+                    setMonth(new Date(year, monthIndex - 1, 1))
+                  }
+                >
+                  <ChevronRight className="flip" size={18} />
+                </button>
+                <h2>
+                  {month.toLocaleDateString("en-GB", {
+                    month: "long",
+                    year: "numeric",
+                  })}
+                </h2>
+                <button
+                  type="button"
+                  className="icon-button"
+                  aria-label="Next month"
+                  onClick={() =>
+                    setMonth(new Date(year, monthIndex + 1, 1))
+                  }
+                >
+                  <ChevronRight size={18} />
+                </button>
+              </div>
+              <div className="calendar-grid weekday-grid">
+                {["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"].map(
+                  (weekday) => (
+                    <span key={weekday}>{weekday}</span>
+                  ),
+                )}
+              </div>
+              <div className="calendar-grid employee-history-calendar-grid">
+                {calendarDays.map((day, index) => {
+                  const date = day
+                    ? `${year}-${fmt(monthIndex + 1)}-${fmt(day)}`
+                    : "";
+                  const record = recordsByDate.get(date);
+                  const statusClassName = record
+                    ? `attendance-day-${record.status.toLowerCase().replaceAll(" ", "-")}`
+                    : "";
+                  return (
+                    <div
+                      key={`${date || "blank"}-${index}`}
+                      className={`employee-history-day ${statusClassName}`}
+                      aria-label={
+                        day
+                          ? `${date}${record ? `: ${record.status}` : ""}`
+                          : undefined
+                      }
+                    >
+                      {day && <span>{day}</span>}
+                    </div>
+                  );
+                })}
+              </div>
+              <div className="employee-history-legend">
+                {statuses.map((status) => (
+                  <span key={status}>
+                    <i
+                      className={`attendance-legend-dot attendance-day-${status.toLowerCase().replaceAll(" ", "-")}`}
+                    />
+                    {status}
+                  </span>
+                ))}
+              </div>
+            </section>
+          )}
+        </>
+      )}
+    </>
+  );
+}
+
 function Employees({
   employees,
   search,
@@ -2824,7 +3124,12 @@ function Employees({
                       <div className="employee-cell">
                         <div className="avatar small">{initials(e.name)}</div>
                         <div>
-                          <strong>{e.name}</strong>
+                          <Link
+                            className="employee-name-link"
+                            to={`/employees/${encodeURIComponent(String(e.id))}`}
+                          >
+                            {e.name}
+                          </Link>
                           <span>EMP-{String(e.id).padStart(4, "0")}</span>
                         </div>
                       </div>
@@ -3035,7 +3340,12 @@ function Attendance({
                     <div className="employee-cell">
                       <div className="avatar small">{initials(e.name)}</div>
                       <div>
-                        <strong>{e.name}</strong>
+                        <Link
+                          className="employee-name-link"
+                          to={`/employees/${encodeURIComponent(String(e.id))}`}
+                        >
+                          {e.name}
+                        </Link>
                       </div>
                     </div>
                   </td>
@@ -3436,9 +3746,18 @@ function Reports({
                   <tr key={a.id}>
                     <td>{a.date}</td>
                     <td>
-                      <strong>
-                        {a.employeeName || employee?.name || "Unknown employee"}
-                      </strong>
+                      {a.employeeId ? (
+                        <Link
+                          className="employee-name-link"
+                          to={`/employees/${encodeURIComponent(String(a.employeeId))}`}
+                        >
+                          {a.employeeName || employee?.name || "Unknown employee"}
+                        </Link>
+                      ) : (
+                        <strong>
+                          {a.employeeName || employee?.name || "Unknown employee"}
+                        </strong>
+                      )}
                     </td>
                     <td>{a.godown || employee?.godown || "Unknown godown"}</td>
                     <td>
@@ -4201,6 +4520,22 @@ function getLocalDateString(date = new Date()) {
 
 function formatLocalDate(date) {
   return `${date.getFullYear()}-${fmt(date.getMonth() + 1)}-${fmt(date.getDate())}`;
+}
+
+function formatEmployeeRegistrationDate(value) {
+  const date =
+    value && typeof value.toDate === "function"
+      ? value.toDate()
+      : value instanceof Date
+        ? value
+        : new Date(value);
+  return Number.isNaN(date.getTime())
+    ? "Not available"
+    : date.toLocaleDateString("en-GB", {
+        day: "numeric",
+        month: "short",
+        year: "numeric",
+      });
 }
 
 function firstDayOfMonth(date) {
