@@ -242,9 +242,9 @@ function App() {
         currentUser.role !== "Staff"
           ? employeesCollection
           : query(
-            employeesCollection,
-            where("godown", "==", currentUser.godown),
-          );
+              employeesCollection,
+              where("godown", "==", currentUser.godown),
+            );
       const snapshot = await getDocs(employeeQuery);
       if (requestId !== employeeRequestId.current) return false;
 
@@ -292,11 +292,7 @@ function App() {
     try {
       const monthStart = formatLocalDate(calendarMonth);
       const monthEnd = formatLocalDate(
-        new Date(
-          calendarMonth.getFullYear(),
-          calendarMonth.getMonth() + 1,
-          0,
-        ),
+        new Date(calendarMonth.getFullYear(), calendarMonth.getMonth() + 1, 0),
       );
       const constraints = [
         where("date", ">=", monthStart),
@@ -413,7 +409,10 @@ function App() {
           setReportAttendanceError(attendanceLoadErrorMessage(error));
           setReportErrorQueryKey(reportQueryKey);
         }
-        console.error("Could not load attendance report from Firestore.", error);
+        console.error(
+          "Could not load attendance report from Firestore.",
+          error,
+        );
         return false;
       } finally {
         if (requestId === reportAttendanceRequestId.current) {
@@ -440,7 +439,10 @@ function App() {
       !isAttendanceDate(reportTo) ||
       reportFrom > reportTo
     ) {
-      showToast("Choose a valid report date range before downloading.", "error");
+      showToast(
+        "Choose a valid report date range before downloading.",
+        "error",
+      );
       return;
     }
 
@@ -481,8 +483,7 @@ function App() {
         type: "report",
         from: reportFrom,
         to: reportTo,
-        godown:
-          scopedGodown === "All godowns" ? "All Godowns" : scopedGodown,
+        godown: scopedGodown === "All godowns" ? "All Godowns" : scopedGodown,
         records: validRecords,
         statuses,
       });
@@ -534,7 +535,10 @@ function App() {
       if (!(isAdmin && scopedGodown === "All godowns")) {
         constraints.push(where("godown", "==", scopedGodown));
       }
-      const attendanceQuery = query(collection(db, "attendance"), ...constraints);
+      const attendanceQuery = query(
+        collection(db, "attendance"),
+        ...constraints,
+      );
       const snapshot = await getDocs(attendanceQuery);
       if (requestId !== dailyAttendanceRequestId.current) return false;
 
@@ -550,7 +554,10 @@ function App() {
       if (requestId === dailyAttendanceRequestId.current) {
         setDailyAttendanceError(attendanceLoadErrorMessage(error));
       }
-      console.error("Could not load selected-date attendance from Firestore.", error);
+      console.error(
+        "Could not load selected-date attendance from Firestore.",
+        error,
+      );
       return false;
     } finally {
       if (requestId === dailyAttendanceRequestId.current) {
@@ -614,7 +621,7 @@ function App() {
                 "Staff account",
               role:
                 SUPER_ADMIN_UIDS.includes(accountDoc.id) &&
-                  profile.role === "SuperAdmin"
+                profile.role === "SuperAdmin"
                   ? "SuperAdmin"
                   : profile.role,
               godown: profile.godown,
@@ -707,7 +714,10 @@ function App() {
           setCurrentUser(null);
           setUserAccounts([]);
           void firebaseSignOut(auth).catch((error) => {
-            console.error("Could not end access after a profile change.", error);
+            console.error(
+              "Could not end access after a profile change.",
+              error,
+            );
           });
           navigate("/login", { replace: true });
           return;
@@ -716,10 +726,10 @@ function App() {
         setCurrentUser((previous) =>
           previous?.id === currentUser.id
             ? {
-              ...previous,
-              role,
-              godown: role === "Staff" ? profile.godown : null,
-            }
+                ...previous,
+                role,
+                godown: role === "Staff" ? profile.godown : null,
+              }
             : previous,
         );
         setActiveGodown(role === "Staff" ? profile.godown : "All godowns");
@@ -824,9 +834,8 @@ function App() {
               "User",
             email: firebaseUser.email || "",
             role,
-            godown: role === "Admin" || role === "SuperAdmin"
-              ? null
-              : profile.godown,
+            godown:
+              role === "Admin" || role === "SuperAdmin" ? null : profile.godown,
           });
           setActiveGodown(
             role === "Admin" || role === "SuperAdmin"
@@ -870,13 +879,12 @@ function App() {
         if (isMounted) {
           setCurrentUser(null);
           setEmployeesLoading(false);
-          setAuthError("Unable to check your sign-in session. Please try again.");
+          setAuthError(
+            "Unable to check your sign-in session. Please try again.",
+          );
           setAuthLoading(false);
         }
-        console.error(
-          "Firebase Authentication session check failed.",
-          error,
-        );
+        console.error("Firebase Authentication session check failed.", error);
       },
     );
 
@@ -967,7 +975,10 @@ function App() {
     try {
       await firebaseSignOut(staffAccountAuth);
     } catch (error) {
-      console.error("Could not clear the secondary Authentication session.", error);
+      console.error(
+        "Could not clear the secondary Authentication session.",
+        error,
+      );
     }
 
     const refreshed = await loadStaffAccounts();
@@ -997,8 +1008,7 @@ function App() {
       !["Staff", "Admin"].includes(role) ||
       (role === "Staff" && !godowns.includes(godown)) ||
       (role === "Admin" && godown !== null) ||
-      (Object.hasOwn(changes, "active") &&
-        typeof changes.active !== "boolean")
+      (Object.hasOwn(changes, "active") && typeof changes.active !== "boolean")
     ) {
       setStaffAccountsError("Choose a valid account role, godown, or status.");
       return false;
@@ -1176,11 +1186,16 @@ function App() {
         return { name: employee.name, godown: employee.godown };
       });
     } catch (error) {
-      console.error("Could not load current employees for import validation.", error);
+      console.error(
+        "Could not load current employees for import validation.",
+        error,
+      );
       if (error.code === "permission-denied") {
         throw new Error("Firestore denied access to employee records.");
       }
-      throw new Error("Could not check existing employees. Check your connection and try again.");
+      throw new Error(
+        "Could not check existing employees. Check your connection and try again.",
+      );
     }
   };
 
@@ -1208,7 +1223,10 @@ function App() {
         importedCount += batchRows.length;
       }
     } catch (error) {
-      console.error("Could not save an employee import batch to Firestore.", error);
+      console.error(
+        "Could not save an employee import batch to Firestore.",
+        error,
+      );
       if (importedCount > 0) {
         showToast(
           `Imported ${importedCount} ${importedCount === 1 ? "employee" : "employees"}; some eligible rows could not be imported.`,
@@ -1245,7 +1263,9 @@ function App() {
       !godowns.includes(godown) ||
       !["Active", "Inactive"].includes(data.status)
     ) {
-      throw new Error("Enter a name, job role, valid godown, and employment status.");
+      throw new Error(
+        "Enter a name, job role, valid godown, and employment status.",
+      );
     }
 
     const employeeData = {
@@ -1366,9 +1386,7 @@ function App() {
       where("date", "==", selectedDate),
     ];
     if (!isAdmin) {
-      matchingRecordConstraints.push(
-        where("godown", "==", currentUser.godown),
-      );
+      matchingRecordConstraints.push(where("godown", "==", currentUser.godown));
     }
     const matchingRecordsQuery = query(
       collection(db, "attendance"),
@@ -1495,9 +1513,7 @@ function App() {
 
   if (authLoading) {
     return (
-      <AuthLoadingScreen
-        message="Verifying your sign-in and account access..."
-      />
+      <AuthLoadingScreen message="Verifying your sign-in and account access..." />
     );
   }
 
@@ -1670,7 +1686,10 @@ function App() {
               <i />
             </button>
             <div className="top-avatar">{initials(currentUser.name)}</div>
-            <button className="btn btn-secondary btn-small top-signout" onClick={signOut}>
+            <button
+              className="btn btn-secondary btn-small top-signout"
+              onClick={signOut}
+            >
               <LogOut size={14} /> Sign out
             </button>
           </div>
@@ -1771,29 +1790,31 @@ function App() {
             />
             <Route
               path="/reports"
-              element={isAdmin ? (
-                <Reports
-                  employees={visibleEmployees}
-                  attendance={visibleReportAttendance}
-                  activeGodown={scopedGodown}
-                  from={reportFrom}
-                  to={reportTo}
-                  previousFrom={loadedReportFrom}
-                  previousTo={loadedReportTo}
-                  setFrom={setReportFrom}
-                  setTo={setReportTo}
-                  loading={reportRefreshPending}
-                  resultsAreStale={reportResultsAreStale}
-                  hasMore={reportHasMore}
-                  error={visibleReportError}
-                  onRetry={() => loadReportAttendance(false)}
-                  onLoadMore={() => loadReportAttendance(true)}
-                  onDownload={downloadAttendanceReport}
-                  exporting={reportExportLoading}
-                />
-              ) : (
-                <Navigate to="/" replace />
-              )}
+              element={
+                isAdmin ? (
+                  <Reports
+                    employees={visibleEmployees}
+                    attendance={visibleReportAttendance}
+                    activeGodown={scopedGodown}
+                    from={reportFrom}
+                    to={reportTo}
+                    previousFrom={loadedReportFrom}
+                    previousTo={loadedReportTo}
+                    setFrom={setReportFrom}
+                    setTo={setReportTo}
+                    loading={reportRefreshPending}
+                    resultsAreStale={reportResultsAreStale}
+                    hasMore={reportHasMore}
+                    error={visibleReportError}
+                    onRetry={() => loadReportAttendance(false)}
+                    onLoadMore={() => loadReportAttendance(true)}
+                    onDownload={downloadAttendanceReport}
+                    exporting={reportExportLoading}
+                  />
+                ) : (
+                  <Navigate to="/" replace />
+                )
+              }
             />
             <Route
               path="/users"
@@ -1844,9 +1865,7 @@ function App() {
         </div>
         <footer className="footer">
           <span>PeopleHub UI prototype</span>
-          <span>
-            Employee records and attendance, organized in one place.
-          </span>
+          <span>Employee records and attendance, organized in one place.</span>
         </footer>
       </main>
 
@@ -1992,7 +2011,9 @@ function LoginPage({ onLogin, onResetPassword, authError }) {
               {mode === "login" ? "WELCOME BACK" : "ACCOUNT RECOVERY"}
             </div>
             <h2>
-              {mode === "login" ? "Sign in to PeopleHub" : "Forgot your password?"}
+              {mode === "login"
+                ? "Sign in to PeopleHub"
+                : "Forgot your password?"}
             </h2>
             <p>
               {mode === "login"
@@ -2035,7 +2056,9 @@ function LoginPage({ onLogin, onResetPassword, authError }) {
                     className="password-toggle"
                     type="button"
                     onClick={() => setShowPassword((shown) => !shown)}
-                    aria-label={showPassword ? "Hide password" : "Show password"}
+                    aria-label={
+                      showPassword ? "Hide password" : "Show password"
+                    }
                   >
                     {showPassword ? <EyeOff size={17} /> : <Eye size={17} />}
                   </button>
@@ -2126,8 +2149,8 @@ function LoginPage({ onLogin, onResetPassword, authError }) {
           )}
 
           <p className="auth-prototype-note">
-            Authentication, password recovery, and account access are managed
-            by Firebase.
+            Authentication, password recovery, and account access are managed by
+            Firebase.
           </p>
         </div>
       </section>
@@ -2135,7 +2158,9 @@ function LoginPage({ onLogin, onResetPassword, authError }) {
   );
 }
 
-function AuthLoadingScreen({ message = "Verifying your sign-in and account access..." }) {
+function AuthLoadingScreen({
+  message = "Verifying your sign-in and account access...",
+}) {
   return (
     <main className="auth-page" aria-busy="true">
       <section className="auth-story">
@@ -2295,9 +2320,7 @@ function CreateStaffPage({ accounts, onCancel, onCreate }) {
             )}
           </div>
           <div className="registration-passwords">
-            <div
-              className={`auth-field ${errors.password ? "has-error" : ""}`}
-            >
+            <div className={`auth-field ${errors.password ? "has-error" : ""}`}>
               <label htmlFor="staff-password">Temporary password</label>
               <span className="auth-input-wrap">
                 <LockKeyhole size={17} />
@@ -2325,9 +2348,7 @@ function CreateStaffPage({ accounts, onCancel, onCreate }) {
             <div
               className={`auth-field ${errors.confirmPassword ? "has-error" : ""}`}
             >
-              <label htmlFor="staff-confirm-password">
-                Confirm password
-              </label>
+              <label htmlFor="staff-confirm-password">Confirm password</label>
               <span className="auth-input-wrap">
                 <LockKeyhole size={17} />
                 <input
@@ -2354,7 +2375,9 @@ function CreateStaffPage({ accounts, onCancel, onCreate }) {
                   )}
                 </button>
               </span>
-              {errors.confirmPassword && <small>{errors.confirmPassword}</small>}
+              {errors.confirmPassword && (
+                <small>{errors.confirmPassword}</small>
+              )}
             </div>
           </div>
         </div>
@@ -2362,8 +2385,8 @@ function CreateStaffPage({ accounts, onCancel, onCreate }) {
           <ShieldCheck size={16} />
           <span>
             Only the protected SuperAdmin can create account profiles. The
-            secondary Firebase Authentication client preserves your session,
-            but a trusted backend is required to restrict Authentication user
+            secondary Firebase Authentication client preserves your session, but
+            a trusted backend is required to restrict Authentication user
             creation itself.
           </span>
         </div>
@@ -2376,7 +2399,11 @@ function CreateStaffPage({ accounts, onCancel, onCreate }) {
           </div>
         )}
         <div className="registration-actions">
-          <button type="button" className="btn btn-secondary" onClick={onCancel}>
+          <button
+            type="button"
+            className="btn btn-secondary"
+            onClick={onCancel}
+          >
             Cancel
           </button>
           <button
@@ -2384,8 +2411,8 @@ function CreateStaffPage({ accounts, onCancel, onCreate }) {
             className="btn btn-primary"
             disabled={submitting}
           >
-            <Plus size={16} /> Create{" "}
-            {role === "Staff" ? "Staff" : "Admin"} account
+            <Plus size={16} /> Create {role === "Staff" ? "Staff" : "Admin"}{" "}
+            account
           </button>
         </div>
       </form>
@@ -2397,7 +2424,10 @@ function firestoreErrorMessage(error) {
   if (error?.code === "permission-denied") {
     return "Firestore denied the profile write. Verify the deployed Firestore security rules.";
   }
-  if (error?.code === "unavailable" || error?.code === "network-request-failed") {
+  if (
+    error?.code === "unavailable" ||
+    error?.code === "network-request-failed"
+  ) {
     return "Check your connection and try again.";
   }
   return "Please check your connection and Firestore configuration.";
@@ -2416,7 +2446,10 @@ function createStaffErrorMessage(error) {
     case "auth/operation-not-allowed":
       return "Email and password account creation is not enabled in Firebase Authentication.";
     default:
-      return error?.message || "Could not create the staff account. Please try again.";
+      return (
+        error?.message ||
+        "Could not create the staff account. Please try again."
+      );
   }
 }
 
@@ -2484,8 +2517,7 @@ function Dashboard({
     (e) =>
       attendance.find(
         (a) => String(a.employeeId) === String(e.id) && a.date === date,
-      )
-        ?.status || "Not marked",
+      )?.status || "Not marked",
   );
   const count = (s) => todayRows.filter((x) => x === s).length;
   const marked = todayRows.filter((x) => x !== "Not marked").length;
@@ -2514,7 +2546,11 @@ function Dashboard({
         }
       />
       {attendanceLoading && (
-        <div className="data-refresh-indicator" role="status" aria-live="polite">
+        <div
+          className="data-refresh-indicator"
+          role="status"
+          aria-live="polite"
+        >
           Updating attendance for {date}…
         </div>
       )}
@@ -2623,14 +2659,13 @@ function Dashboard({
                 (e) => e.status === "Active" && e.godown === name,
               );
               const members = activeMembers.length;
-              const present = activeMembers.filter(
-                (e) =>
-                  attendance.some(
-                    (a) =>
-                      a.employeeId === e.id &&
-                      a.date === date &&
-                      a.status === "Present",
-                  ),
+              const present = activeMembers.filter((e) =>
+                attendance.some(
+                  (a) =>
+                    a.employeeId === e.id &&
+                    a.date === date &&
+                    a.status === "Present",
+                ),
               ).length;
               return (
                 <button
@@ -2723,9 +2758,7 @@ function EmployeeProfile({ currentUser }) {
 
     const employeeRequest = getDoc(doc(db, "employees", employeeId))
       .then((snapshot) =>
-        snapshot.exists()
-          ? { id: snapshot.id, ...snapshot.data() }
-          : null,
+        snapshot.exists() ? { id: snapshot.id, ...snapshot.data() } : null,
       )
       .catch((readError) => {
         if (readError.code === "permission-denied") return null;
@@ -2735,9 +2768,7 @@ function EmployeeProfile({ currentUser }) {
       where("employeeId", "==", String(employeeId)),
     ];
     if (currentUser.role === "Staff") {
-      attendanceConstraints.push(
-        where("godown", "==", currentUser.godown),
-      );
+      attendanceConstraints.push(where("godown", "==", currentUser.godown));
     }
 
     Promise.all([
@@ -2817,9 +2848,7 @@ function EmployeeProfile({ currentUser }) {
   ];
   while (calendarDays.length % 7) calendarDays.push(null);
 
-  const recordsByDate = new Map(
-    records.map((record) => [record.date, record]),
-  );
+  const recordsByDate = new Map(records.map((record) => [record.date, record]));
   const summary = statuses.map((status) => ({
     status,
     count: records.filter((record) => record.status === status).length,
@@ -2845,12 +2874,19 @@ function EmployeeProfile({ currentUser }) {
         }
       />
       {loading && (
-        <div className="data-refresh-indicator" role="status" aria-live="polite">
+        <div
+          className="data-refresh-indicator"
+          role="status"
+          aria-live="polite"
+        >
           Loading employee profile and attendance history…
         </div>
       )}
       {error && (
-        <div className="employee-load-error employee-load-error-banner" role="alert">
+        <div
+          className="employee-load-error employee-load-error-banner"
+          role="alert"
+        >
           <span>{error}</span>
           <button
             type="button"
@@ -2902,7 +2938,9 @@ function EmployeeProfile({ currentUser }) {
           <section className="employee-history-summary">
             {summary.map(({ status, count }) => (
               <div className="panel employee-history-stat" key={status}>
-                <span className={`mini-dot ${status.toLowerCase().replace(" ", "-")}`} />
+                <span
+                  className={`mini-dot ${status.toLowerCase().replace(" ", "-")}`}
+                />
                 <span>{status}</span>
                 <strong>{loading ? "…" : count}</strong>
               </div>
@@ -2920,9 +2958,7 @@ function EmployeeProfile({ currentUser }) {
                   type="button"
                   className="icon-button"
                   aria-label="Previous month"
-                  onClick={() =>
-                    setMonth(new Date(year, monthIndex - 1, 1))
-                  }
+                  onClick={() => setMonth(new Date(year, monthIndex - 1, 1))}
                 >
                   <ChevronRight className="flip" size={18} />
                 </button>
@@ -2936,9 +2972,7 @@ function EmployeeProfile({ currentUser }) {
                   type="button"
                   className="icon-button"
                   aria-label="Next month"
-                  onClick={() =>
-                    setMonth(new Date(year, monthIndex + 1, 1))
-                  }
+                  onClick={() => setMonth(new Date(year, monthIndex + 1, 1))}
                 >
                   <ChevronRight size={18} />
                 </button>
@@ -3099,10 +3133,7 @@ function Employees({
               )}
               {error && !loading && (
                 <tr>
-                  <td
-                    colSpan={isAdmin ? 5 : 3}
-                    className="empty-state"
-                  >
+                  <td colSpan={isAdmin ? 5 : 3} className="empty-state">
                     <div className="employee-load-error" role="alert">
                       <span>{error}</span>
                       <button
@@ -3219,7 +3250,11 @@ function Attendance({
         subtitle="Mark attendance and correct saved entries for the selected date."
       />
       {loading && (
-        <div className="data-refresh-indicator" role="status" aria-live="polite">
+        <div
+          className="data-refresh-indicator"
+          role="status"
+          aria-live="polite"
+        >
           Updating attendance for {date}…
         </div>
       )}
@@ -3299,9 +3334,7 @@ function Attendance({
       <div className="panel table-panel">
         <div className="table-topline">
           <div>
-            <strong>
-              {hasCurrentData ? filtered.length : "—"} employees
-            </strong>
+            <strong>{hasCurrentData ? filtered.length : "—"} employees</strong>
             <span> · {date}</span>
           </div>
           <span className="muted-small">
@@ -3334,62 +3367,67 @@ function Attendance({
                   </td>
                 </tr>
               )}
-              {hasCurrentData && filtered.map((e) => (
-                <tr key={e.id}>
-                  <td>
-                    <div className="employee-cell">
-                      <div className="avatar small">{initials(e.name)}</div>
-                      <div>
-                        <Link
-                          className="employee-name-link"
-                          to={`/employees/${encodeURIComponent(String(e.id))}`}
-                        >
-                          {e.name}
-                        </Link>
+              {hasCurrentData &&
+                filtered.map((e) => (
+                  <tr key={e.id}>
+                    <td>
+                      <div className="employee-cell">
+                        <div className="avatar small">{initials(e.name)}</div>
+                        <div>
+                          <Link
+                            className="employee-name-link"
+                            to={`/employees/${encodeURIComponent(String(e.id))}`}
+                          >
+                            {e.name}
+                          </Link>
+                        </div>
                       </div>
-                    </div>
-                  </td>
-                  <td>{e.role}</td>
-                  {isAdmin && <td>{e.godown}</td>}
-                  <td>
-                    <select
-                      className={`attendance-select ${statusClass(e.attendance)}`}
-                      value={e.attendance}
-                      disabled={
-                        loading ||
-                        saving ||
-                        Boolean(error) ||
-                        (e.status !== "Active" && e.attendance === "Not marked")
-                      }
-                      title={
-                        e.status !== "Active" && e.attendance === "Not marked"
-                          ? "Inactive employees cannot receive new attendance records."
-                          : undefined
-                      }
-                      onChange={(ev) => onMark(e.id, ev.target.value)}
-                    >
-                      <option disabled>Not marked</option>
-                      {statuses.map((s) => (
-                        <option key={s}>{s}</option>
-                      ))}
-                    </select>
-                  </td>
-                  <td>
-                    <span className="muted-small">
-                      {e.attendanceRecord
-                        ? `${formatAttendanceTimestamp(e.attendanceRecord.updatedAt)} · ${e.attendanceRecord.updatedBy || "User"}`
-                        : "Not marked"}
-                    </span>
-                  </td>
-                </tr>
-              ))}
-              {hasCurrentData && !loading && !error && filtered.length === 0 && (
-                <tr>
-                  <td colSpan={isAdmin ? 5 : 4} className="empty-state">
-                    No attendance entries for this filter.
-                  </td>
-                </tr>
-              )}
+                    </td>
+                    <td>{e.role}</td>
+                    {isAdmin && <td>{e.godown}</td>}
+                    <td>
+                      <select
+                        className={`attendance-select ${statusClass(e.attendance)}`}
+                        value={e.attendance}
+                        disabled={
+                          loading ||
+                          saving ||
+                          Boolean(error) ||
+                          (e.status !== "Active" &&
+                            e.attendance === "Not marked")
+                        }
+                        title={
+                          e.status !== "Active" && e.attendance === "Not marked"
+                            ? "Inactive employees cannot receive new attendance records."
+                            : undefined
+                        }
+                        onChange={(ev) => onMark(e.id, ev.target.value)}
+                      >
+                        <option disabled>Not marked</option>
+                        {statuses.map((s) => (
+                          <option key={s}>{s}</option>
+                        ))}
+                      </select>
+                    </td>
+                    <td>
+                      <span className="muted-small">
+                        {e.attendanceRecord
+                          ? `${formatAttendanceTimestamp(e.attendanceRecord.updatedAt)} · ${e.attendanceRecord.updatedBy || "User"}`
+                          : "Not marked"}
+                      </span>
+                    </td>
+                  </tr>
+                ))}
+              {hasCurrentData &&
+                !loading &&
+                !error &&
+                filtered.length === 0 && (
+                  <tr>
+                    <td colSpan={isAdmin ? 5 : 4} className="empty-state">
+                      No attendance entries for this filter.
+                    </td>
+                  </tr>
+                )}
             </tbody>
           </table>
         </div>
@@ -3468,7 +3506,11 @@ function CalendarPage({
         subtitle="Choose a day to review or update attendance. Select a date to open its daily register."
       />
       {loading && (
-        <div className="data-refresh-indicator" role="status" aria-live="polite">
+        <div
+          className="data-refresh-indicator"
+          role="status"
+          aria-live="polite"
+        >
           Updating calendar attendance…
         </div>
       )}
@@ -3583,8 +3625,8 @@ function CalendarPage({
       <div className="calendar-tip">
         <CalendarDays size={17} />
         <span>
-          Calendar indicators reflect saved attendance records in your
-          permitted godown scope.
+          Calendar indicators reflect saved attendance records in your permitted
+          godown scope.
         </span>
       </div>
     </>
@@ -3613,11 +3655,8 @@ function Reports({
   const rows = resultsAreStale
     ? []
     : attendance.filter(
-      (a) =>
-        a.date >= from &&
-        a.date <= to &&
-        statuses.includes(a.status),
-    );
+        (a) => a.date >= from && a.date <= to && statuses.includes(a.status),
+      );
   return (
     <>
       <PageHeading
@@ -3721,7 +3760,11 @@ function Reports({
           </span>
         </div>
         {resultsAreStale && (
-          <div className="data-refresh-indicator report-refresh" role="status" aria-live="polite">
+          <div
+            className="data-refresh-indicator report-refresh"
+            role="status"
+            aria-live="polite"
+          >
             {loading
               ? `Loading attendance from ${from} to ${to}. Previous results are hidden until this range is ready.`
               : `The selected range could not be loaded. Previous results from ${previousFrom} to ${previousTo} are hidden.`}
@@ -3751,11 +3794,15 @@ function Reports({
                           className="employee-name-link"
                           to={`/employees/${encodeURIComponent(String(a.employeeId))}`}
                         >
-                          {a.employeeName || employee?.name || "Unknown employee"}
+                          {a.employeeName ||
+                            employee?.name ||
+                            "Unknown employee"}
                         </Link>
                       ) : (
                         <strong>
-                          {a.employeeName || employee?.name || "Unknown employee"}
+                          {a.employeeName ||
+                            employee?.name ||
+                            "Unknown employee"}
                         </strong>
                       )}
                     </td>
@@ -3896,12 +3943,7 @@ function UsersPage({
   );
 }
 
-function UserAccountRow({
-  account,
-  currentUserId,
-  disabled,
-  onUpdate,
-}) {
+function UserAccountRow({ account, currentUserId, disabled, onUpdate }) {
   const [pendingRole, setPendingRole] = useState(null);
   const role = pendingRole || account.role;
   const canEditRole = account.id !== currentUserId;
@@ -4009,9 +4051,7 @@ function UserAccountRow({
             account.id === currentUserId ||
             SUPER_ADMIN_UIDS.includes(account.id)
           }
-          onClick={() =>
-            void onUpdate(account.id, { active: !account.active })
-          }
+          onClick={() => void onUpdate(account.id, { active: !account.active })}
         >
           {account.active ? "Deactivate" : "Activate"}
         </button>
@@ -4275,8 +4315,8 @@ function EmployeeImportModal({ onClose, onGetEmployees, onSave }) {
                         Successfully imported {result.importedCount}{" "}
                         {result.importedCount === 1 ? "employee" : "employees"}.
                       </strong>{" "}
-                      Skipped{" "}
-                      {result.duplicateCount ?? duplicateCount} duplicates.{" "}
+                      Skipped {result.duplicateCount ?? duplicateCount}{" "}
+                      duplicates.{" "}
                       {result.validationFailureCount ?? validationFailureCount}{" "}
                       rows had validation failures.
                     </div>
@@ -4287,17 +4327,14 @@ function EmployeeImportModal({ onClose, onGetEmployees, onSave }) {
                         Successfully imported {result.importedCount}{" "}
                         {result.importedCount === 1 ? "employee" : "employees"}.
                       </strong>{" "}
-                      {Math.max(
-                        result.eligibleCount - result.importedCount,
-                        0,
-                      )}{" "}
+                      {Math.max(result.eligibleCount - result.importedCount, 0)}{" "}
                       eligible{" "}
                       {result.eligibleCount - result.importedCount === 1
                         ? "employee was"
                         : "employees were"}{" "}
                       not imported because saving stopped.{" "}
-                      {result.duplicateCount ?? duplicateCount} duplicates
-                      were skipped and{" "}
+                      {result.duplicateCount ?? duplicateCount} duplicates were
+                      skipped and{" "}
                       {result.validationFailureCount ?? validationFailureCount}{" "}
                       rows had validation failures.
                     </div>
@@ -4337,7 +4374,9 @@ function EmployeeImportModal({ onClose, onGetEmployees, onSave }) {
                                   skipped.
                                 </span>
                               ) : (
-                                <span className="employee-import-ready">Ready</span>
+                                <span className="employee-import-ready">
+                                  Ready
+                                </span>
                               )}
                             </td>
                           </tr>
@@ -4383,13 +4422,7 @@ function EmployeeImportModal({ onClose, onGetEmployees, onSave }) {
   );
 }
 
-function EmployeeModal({
-  employee,
-  onClose,
-  onSave,
-  defaultGodown,
-  isAdmin,
-}) {
+function EmployeeModal({ employee, onClose, onSave, defaultGodown, isAdmin }) {
   const [form, setForm] = useState(
     employee || {
       name: "",
@@ -4447,7 +4480,7 @@ function EmployeeModal({
               value={form.role}
               onChange={(e) => update("role", e.target.value)}
             >
-              {["Loader", "Supervisor", "Clerk", "IT Clerk"].map((r) => (
+              {["Loader", "Supervisor", "IT Clerk"].map((r) => (
                 <option key={r}>{r}</option>
               ))}
             </select>
@@ -4532,10 +4565,10 @@ function formatEmployeeRegistrationDate(value) {
   return Number.isNaN(date.getTime())
     ? "Not available"
     : date.toLocaleDateString("en-GB", {
-      day: "numeric",
-      month: "short",
-      year: "numeric",
-    });
+        day: "numeric",
+        month: "short",
+        year: "numeric",
+      });
 }
 
 function firstDayOfMonth(date) {
@@ -4650,7 +4683,7 @@ function statusClass(s = "") {
 function statusTone(s) {
   return (
     { Present: "green", Absent: "red", Sick: "orange", "On Leave": "purple" }[
-    s
+      s
     ] || "blue"
   );
 }
