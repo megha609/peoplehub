@@ -86,6 +86,7 @@ const today = getLocalDateString();
 const SUPER_ADMIN_UIDS = ["ZYa131iL8AYn5fAZauhDH5R3ody2"];
 const statuses = ["Present", "Absent", "Sick", "On Leave", "Overtime"];
 const attendancePageSize = 50;
+const employeeAuditPageSize = 20;
 const titleMap = {
   "/": "Overview",
   "/employees": "Employee register",
@@ -110,6 +111,33 @@ function createReportAttendanceQuery(from, to, scopedGodown, cursor = null) {
   }
   if (cursor) constraints.push(startAfter(cursor));
   return query(collection(db, "attendance"), ...constraints);
+}
+
+function createEmployeeAuditQuery(
+  employeeId,
+  role,
+  godown,
+  range,
+  cursor = null,
+) {
+  const constraints = [where("employeeId", "==", String(employeeId))];
+  if (role === "Staff") {
+    constraints.push(where("godown", "==", godown));
+  }
+  if (range.from) {
+    constraints.push(
+      where("changedAt", ">=", localDateBoundary(range.from)),
+    );
+  }
+  if (range.to) {
+    constraints.push(
+      where("changedAt", "<", localDateBoundary(range.to, 1)),
+    );
+  }
+  constraints.push(orderBy("changedAt", "desc"));
+  if (cursor) constraints.push(startAfter(cursor));
+  constraints.push(limit(employeeAuditPageSize + 1));
+  return query(collection(db, "attendanceAudit"), ...constraints);
 }
 
 function App() {
@@ -2747,10 +2775,144 @@ function EmployeeProfile({ currentUser }) {
   const navigate = useNavigate();
   const [employee, setEmployee] = useState(null);
   const [records, setRecords] = useState([]);
+  const [auditRecords, setAuditRecords] = useState([]);
+  const [auditFrom, setAuditFrom] = useState("");
+  const [auditTo, setAuditTo] = useState("");
+  const [appliedAuditRange, setAppliedAuditRange] = useState({
+    from: "",
+    to: "",
+  });
+  const [auditRangeError, setAuditRangeError] = useState("");
+  const [auditLoading, setAuditLoading] = useState(true);
+  const [auditLoadingMore, setAuditLoadingMore] = useState(false);
+  const [auditError, setAuditError] = useState("");
+  const [auditMoreError, setAuditMoreError] = useState("");
+  const [auditCursor, setAuditCursor] = useState(null);
+  const [auditHasMore, setAuditHasMore] = useState(false);
+  const [auditReloadKey, setAuditReloadKey] = useState(0);
+  const auditQueryGeneration = useRef(0);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [reloadKey, setReloadKey] = useState(0);
   const [month, setMonth] = useState(() => firstDayOfMonth(new Date()));
+
+  useEffect(() => {
+    let active = true;
+    const requestGeneration = ++auditQueryGeneration.current;
+    setAuditLoading(true);
+    setAuditLoadingMore(false);
+    setAuditError("");
+    setAuditMoreError("");
+    setAuditRecords([]);
+    setAuditCursor(null);
+    setAuditHasMore(false);
+
+    getDocsFromServer(
+      createEmployeeAuditQuery(
+        employeeId,
+        currentUser.role,
+        currentUser.godown,
+        appliedAuditRange,
+      ),
+    )
+      .then((snapshot) => {
+      if (!active || requestGeneration !== auditQueryGeneration.current) return;
+        const page = snapshot.docs.slice(0, employeeAuditPageSize);
+        setAuditRecords(
+          page.map((auditDoc) => ({ id: auditDoc.id, ...auditDoc.data() })),
+        );
+        setAuditCursor(page[page.length - 1] || null);
+        setAuditHasMore(snapshot.docs.length > employeeAuditPageSize);
+      })
+      .catch((loadError) => {
+        if (!active || requestGeneration !== auditQueryGeneration.current) return;
+        console.error(
+          "Could not load employee attendance audit history.",
+          loadError,
+        );
+        setAuditError(
+          loadError.code === "permission-denied"
+            ? "You do not have permission to view this attendance change history."
+            : loadError.code === "failed-precondition"
+              ? "Firestore requires a composite index to load this attendance change history."
+              : "Could not load attendance change history. Check your connection and try again.",
+        );
+      })
+      .finally(() => {
+        if (active && requestGeneration === auditQueryGeneration.current) {
+          setAuditLoading(false);
+        }
+      });
+
+    return () => {
+      active = false;
+    };
+  }, [
+    appliedAuditRange,
+    auditReloadKey,
+    currentUser.godown,
+    currentUser.role,
+    employeeId,
+  ]);
+
+  const loadMoreAudit = async () => {
+    if (!auditCursor || auditLoadingMore) return;
+    const requestGeneration = auditQueryGeneration.current;
+    setAuditLoadingMore(true);
+    setAuditMoreError("");
+    try {
+      const snapshot = await getDocsFromServer(
+        createEmployeeAuditQuery(
+          employeeId,
+          currentUser.role,
+          currentUser.godown,
+          appliedAuditRange,
+          auditCursor,
+        ),
+      );
+      if (requestGeneration !== auditQueryGeneration.current) return;
+      const page = snapshot.docs.slice(0, employeeAuditPageSize);
+      setAuditRecords((existing) => [
+        ...existing,
+        ...page.map((auditDoc) => ({ id: auditDoc.id, ...auditDoc.data() })),
+      ]);
+      setAuditCursor(page[page.length - 1] || auditCursor);
+      setAuditHasMore(snapshot.docs.length > employeeAuditPageSize);
+    } catch (loadError) {
+      if (requestGeneration !== auditQueryGeneration.current) return;
+      console.error(
+        "Could not load more employee attendance audit history.",
+        loadError,
+      );
+      setAuditMoreError(
+        loadError.code === "permission-denied"
+          ? "Firestore denied access to the next attendance history page."
+          : loadError.code === "failed-precondition"
+            ? "Firestore requires a composite index to load the next history page."
+            : "Could not load more attendance history. Check your connection and retry.",
+      );
+    } finally {
+      if (requestGeneration === auditQueryGeneration.current) {
+        setAuditLoadingMore(false);
+      }
+    }
+  };
+
+  const applyAuditRange = () => {
+    if (auditFrom && auditTo && auditFrom > auditTo) {
+      setAuditRangeError("The start date must be on or before the end date.");
+      return;
+    }
+    setAuditRangeError("");
+    setAppliedAuditRange({ from: auditFrom, to: auditTo });
+  };
+
+  const clearAuditRange = () => {
+    setAuditFrom("");
+    setAuditTo("");
+    setAuditRangeError("");
+    setAppliedAuditRange({ from: "", to: "" });
+  };
 
   useEffect(() => {
     let active = true;
@@ -3025,6 +3187,142 @@ function EmployeeProfile({ currentUser }) {
           )}
         </>
       )}
+
+      <section className="panel employee-audit-history">
+        <div className="panel-heading employee-audit-heading">
+          <div>
+            <h2>Attendance change history</h2>
+            <p>
+              Corrections are shown newest first. Date filters use the
+              correction timestamp.
+            </p>
+          </div>
+        </div>
+        <div className="employee-audit-filters">
+          <label>
+            <span>Corrected from</span>
+            <input
+              type="date"
+              value={auditFrom}
+              onChange={(event) => setAuditFrom(event.target.value)}
+            />
+          </label>
+          <label>
+            <span>Corrected through</span>
+            <input
+              type="date"
+              value={auditTo}
+              onChange={(event) => setAuditTo(event.target.value)}
+            />
+          </label>
+          <button
+            type="button"
+            className="btn btn-primary btn-small"
+            onClick={applyAuditRange}
+            disabled={auditLoading}
+          >
+            Apply range
+          </button>
+          <button
+            type="button"
+            className="btn btn-secondary btn-small"
+            onClick={clearAuditRange}
+            disabled={auditLoading}
+          >
+            Clear
+          </button>
+        </div>
+        {auditRangeError && (
+          <div className="employee-load-error-banner" role="alert">
+            {auditRangeError}
+          </div>
+        )}
+        {auditLoading && (
+          <div
+            className="data-refresh-indicator"
+            role="status"
+            aria-live="polite"
+          >
+            Loading attendance change history…
+          </div>
+        )}
+        {!auditLoading && auditError && (
+          <div
+            className="employee-load-error employee-load-error-banner"
+            role="alert"
+          >
+            <span>{auditError}</span>
+            <button
+              type="button"
+              className="btn btn-secondary btn-small"
+              onClick={() => setAuditReloadKey((key) => key + 1)}
+            >
+              Retry
+            </button>
+          </div>
+        )}
+        {!auditLoading && !auditError && auditRecords.length === 0 && (
+          <div className="empty-state employee-audit-empty">
+            No attendance corrections found for this employee and date range.
+          </div>
+        )}
+        {!auditLoading && !auditError && auditRecords.length > 0 && (
+          <>
+            <div className="table-wrap employee-audit-table-wrap">
+              <table className="employee-audit-table">
+                <thead>
+                  <tr>
+                    <th>ATTENDANCE DATE</th>
+                    <th>PREVIOUS STATUS</th>
+                    <th>NEW STATUS</th>
+                    <th>CORRECTED BY</th>
+                    <th>CORRECTED AT</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {auditRecords.map((record) => (
+                    <tr key={record.id}>
+                      <td>
+                        <time dateTime={record.date}>
+                          {record.date || "Not recorded"}
+                        </time>
+                      </td>
+                      <td>{record.previousStatus || "Not recorded"}</td>
+                      <td>{record.newStatus || "Not recorded"}</td>
+                      <td>{record.changedBy || "Not recorded"}</td>
+                      <td>{formatAttendanceTimestamp(record.changedAt)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+            {auditMoreError && (
+              <div
+                className="employee-load-error employee-load-error-banner"
+                role="alert"
+              >
+                <span>{auditMoreError}</span>
+              </div>
+            )}
+            {auditHasMore && (
+              <div className="employee-audit-pagination">
+                <button
+                  type="button"
+                  className="btn btn-secondary btn-small"
+                  onClick={loadMoreAudit}
+                  disabled={auditLoadingMore}
+                >
+                  {auditLoadingMore
+                    ? "Loading…"
+                    : auditMoreError
+                      ? "Retry loading more"
+                      : "Load more"}
+                </button>
+              </div>
+            )}
+          </>
+        )}
+      </section>
     </>
   );
 }
@@ -4570,6 +4868,11 @@ function initials(name = "") {
 
 function getLocalDateString(date = new Date()) {
   return formatLocalDate(date);
+}
+
+function localDateBoundary(date, addDays = 0) {
+  const [year, month, day] = date.split("-").map(Number);
+  return new Date(year, month - 1, day + addDays);
 }
 
 function formatLocalDate(date) {
