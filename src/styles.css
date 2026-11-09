@@ -1383,6 +1383,23 @@ tbody tr:hover {
   padding: 11px 12px;
   color: #75877f;
   font-size: 10px;
+  font-family: inherit;
+  text-align: left;
+  cursor: pointer;
+  transition:
+    border-color 160ms ease,
+    background 160ms ease;
+}
+
+.mini-stat:hover,
+.mini-stat.active {
+  border-color: #acd8c4;
+  background: #f3faf6;
+}
+
+.mini-stat:focus-visible {
+  outline: 2px solid #18876e;
+  outline-offset: 2px;
 }
 
 .mini-stat strong {

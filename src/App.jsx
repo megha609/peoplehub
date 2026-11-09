@@ -2507,6 +2507,9 @@ function Dashboard({
   navigate,
   setSearch,
 }) {
+  const hour = new Date().getHours();
+  const greeting =
+    hour < 12 ? "Good morning" : hour < 18 ? "Good afternoon" : "Good evening";
   const scoped = employees.filter(
     (e) =>
       e.status === "Active" &&
@@ -2528,7 +2531,7 @@ function Dashboard({
         eyebrow={isAdmin ? "COMPANY OVERVIEW" : "STAFF WORKSPACE"}
         title={
           isAdmin
-            ? `Good morning, ${currentUserRole}`
+            ? `${greeting}, ${currentUserRole}`
             : "Welcome to your workspace"
         }
         subtitle={
@@ -3238,6 +3241,7 @@ function Attendance({
     filter === "All statuses" ? true : r.attendance === filter,
   );
   const summary = (s) => rows.filter((r) => r.attendance === s).length;
+  const quickFilters = ["All statuses", ...statuses, "Not marked"];
   const marked = rows.filter((row) => row.attendance !== "Not marked").length;
   const completionPercent = rows.length
     ? Math.round((marked / rows.length) * 100)
@@ -3282,29 +3286,46 @@ function Attendance({
             onChange={(e) => setDate(e.target.value)}
           />
         </label>
+        <button
+          type="button"
+          className="btn btn-secondary btn-small"
+          onClick={() => setDate(getLocalDateString())}
+        >
+          Today
+        </button>
         <div className="filter-context">
           <Warehouse size={15} />
           {activeGodown}
         </div>
         <div className="control-spacer" />
-        <label className="select-filter">
-          <SlidersHorizontal size={15} />
-          <select value={filter} onChange={(e) => setFilter(e.target.value)}>
-            <option>All statuses</option>
-            {statuses.map((s) => (
-              <option key={s}>{s}</option>
-            ))}
-            <option>Not marked</option>
-          </select>
-        </label>
       </div>
-      <div className="mini-stats">
-        {statuses.map((s) => (
-          <div className="mini-stat" key={s}>
-            <span className={`mini-dot ${s.toLowerCase().replace(" ", "-")}`} />
-            <span>{s}</span>
-            <strong>{hasCurrentData ? summary(s) : "…"}</strong>
-          </div>
+      <div
+        className="mini-stats"
+        role="group"
+        aria-label="Filter by attendance status"
+      >
+        {quickFilters.map((status) => (
+          <button
+            type="button"
+            className={`mini-stat${filter === status ? " active" : ""}`}
+            key={status}
+            aria-pressed={filter === status}
+            onClick={() => setFilter(status)}
+          >
+            {status !== "All statuses" && (
+              <span
+                className={`mini-dot ${status.toLowerCase().replace(" ", "-")}`}
+              />
+            )}
+            <span>{status}</span>
+            <strong>
+              {hasCurrentData
+                ? status === "All statuses"
+                  ? rows.length
+                  : summary(status)
+                : "…"}
+            </strong>
+          </button>
         ))}
       </div>
       <section className="panel attendance-completion">
