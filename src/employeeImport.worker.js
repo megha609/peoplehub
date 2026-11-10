@@ -1,11 +1,9 @@
 import ExcelJS from "exceljs";
-import { godowns } from "./data.js";
 import {
   normalizeComparisonName,
   normalizeDisplayName,
 } from "./employeeName.js";
 
-const employeeRoles = ["Loader", "Supervisor", "Clerk", "IT Clerk"];
 const employeeStatuses = ["Active", "Inactive"];
 const headerAliases = {
   name: "name",
@@ -19,6 +17,7 @@ const headerAliases = {
   employeerole: "role",
   godown: "godown",
   warehouse: "godown",
+  department: "department",
   status: "status",
   employmentstatus: "status",
   employeestatus: "status",
@@ -31,7 +30,11 @@ self.addEventListener("message", async ({ data }) => {
         ? await createTemplate()
         : data.type === "report"
           ? await createAttendanceReport(data)
-          : await parseWorkbook(data.fileBuffer, data.existingEmployees);
+          : await parseWorkbook(
+              data.fileBuffer,
+              data.existingEmployees,
+              data.catalogs,
+            );
     if (result instanceof ArrayBuffer) {
       self.postMessage({ type: "success", result }, [result]);
     } else {
@@ -56,10 +59,11 @@ async function createTemplate() {
     { header: "Name", key: "name", width: 32 },
     { header: "Role", key: "role", width: 20 },
     { header: "Godown", key: "godown", width: 38 },
+    { header: "Department", key: "department", width: 24 },
     { header: "Status", key: "status", width: 18 },
   ];
   worksheet.views = [{ state: "frozen", ySplit: 1 }];
-  worksheet.autoFilter = "A1:D1";
+  worksheet.autoFilter = "A1:E1";
   worksheet.getRow(1).font = { bold: true, color: { argb: "FFFFFFFF" } };
   worksheet.getRow(1).fill = {
     type: "pattern",
@@ -168,7 +172,7 @@ async function createAttendanceReport({
       );
 }
 
-async function parseWorkbook(fileBuffer, existingEmployees) {
+async function parseWorkbook(fileBuffer, existingEmployees, catalogs) {
   const workbook = new ExcelJS.Workbook();
   try {
     await workbook.xlsx.load(fileBuffer);
@@ -198,6 +202,7 @@ async function parseWorkbook(fileBuffer, existingEmployees) {
       thirdName: readCell(row, columns.thirdName),
       role: readCell(row, columns.role),
       godown: readCell(row, columns.godown),
+      department: readCell(row, columns.department),
       status: readCell(row, columns.status),
     };
     if (Object.values(raw).every((value) => !value)) continue;
@@ -206,13 +211,19 @@ async function parseWorkbook(fileBuffer, existingEmployees) {
       ? raw.name
       : [raw.firstName, raw.secondName, raw.thirdName].filter(Boolean).join(" ");
     const name = normalizeDisplayName(nameInput);
-    const role = findConfiguredValue(raw.role, employeeRoles);
-    const godown = findConfiguredValue(raw.godown, godowns);
+    const role = findCatalogValue(raw.role, catalogs?.jobRoles);
+    const godown = findCatalogValue(raw.godown, catalogs?.godowns);
+    const department = raw.department
+      ? findCatalogValue(raw.department, catalogs?.departments)
+      : null;
     const status = findConfiguredValue(raw.status, employeeStatuses);
     const errors = [];
     if (!name) errors.push("Name is required.");
-    if (!role) errors.push("Role must be Loader, Supervisor, Clerk, or IT Clerk.");
-    if (!godown) errors.push("Godown must match one of the configured godowns.");
+    if (!role) errors.push("Job role must match an active configured job role.");
+    if (!godown) errors.push("Godown must match an active configured godown.");
+    if (raw.department && !department) {
+      errors.push("Department must match an active configured department.");
+    }
     if (!status) errors.push("Status must be Active or Inactive.");
 
     let duplicate = null;
@@ -230,8 +241,12 @@ async function parseWorkbook(fileBuffer, existingEmployees) {
       rowNumber,
       employee: {
         name,
-        role: role || raw.role,
-        godown: godown || raw.godown,
+        role: role?.name || raw.role,
+        roleId: role?.id || "",
+        godown: godown?.name || raw.godown,
+        godownId: godown?.id || "",
+        department: department?.name || "",
+        departmentId: department?.id || "",
         status: status || raw.status,
       },
       errors,
@@ -294,4 +309,22 @@ function normalizeHeader(value) {
 function findConfiguredValue(value, allowedValues) {
   const normalized = normalizeDisplayName(value).toLowerCase();
   return allowedValues.find((allowed) => allowed.toLowerCase() === normalized) || "";
+}
+
+function findCatalogValue(input, catalog) {
+  if (!input || !catalog || typeof catalog !== "object") return null;
+  const normalized = normalizeComparisonName(input);
+  for (const [id, entry] of Object.entries(catalog)) {
+    if (entry?.active !== true) continue;
+    if (
+      [entry.name, ...(entry.legacyAliases || [])].some(
+        (name) =>
+          typeof name === "string" &&
+          normalizeComparisonName(name) === normalized,
+      )
+    ) {
+      return { id, name: entry.name };
+    }
+  }
+  return null;
 }

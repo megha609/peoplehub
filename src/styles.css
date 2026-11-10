@@ -2205,6 +2205,15 @@ tbody tr:hover {
     grid-template-columns: 1fr;
   }
 
+  .catalog-entry {
+    flex-wrap: wrap;
+  }
+
+  .catalog-entry input {
+    flex-basis: 100%;
+    max-width: none;
+  }
+
   .footer {
     padding: 13px 18px;
     gap: 10px;
@@ -2926,6 +2935,56 @@ tbody tr:hover {
 
 .top-signout {
   display: none;
+}
+
+.catalog-management {
+  display: grid;
+  gap: 14px;
+  margin-top: 18px;
+}
+
+.catalog-section {
+  padding: 18px;
+}
+
+.catalog-section > .section-head h2 {
+  margin: 0;
+  font-size: 15px;
+}
+
+.catalog-add-form,
+.catalog-entry {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+}
+
+.catalog-add-form {
+  margin: 14px 0;
+}
+
+.catalog-add-form input,
+.catalog-entry input {
+  min-width: 0;
+  flex: 1;
+}
+
+.catalog-entry-list {
+  display: grid;
+  gap: 9px;
+}
+
+.catalog-entry {
+  padding-top: 9px;
+  border-top: 1px solid #edf2ee;
+}
+
+.catalog-entry input {
+  max-width: 300px;
+}
+
+.catalog-entry .status-badge {
+  flex-shrink: 0;
 }
 
 @media (max-width: 900px) {
