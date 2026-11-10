@@ -5,3 +5,5 @@ dist
 .DS_Store
 # Firebase generated files
 .firebase/
+# Firebase local cache
+.firebase/

@@ -3,7 +3,7 @@ rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
     function protectedSuperAdminUids() {
-      return ["ZYa131iL8AYn5fAZauhDH5R3ody2"];
+      return ["ZYa131iL8AYn5fAZauhDH5R3ody2","a1Y9aWQ4WVYVx00tEEMJ6bdSfuu2","Z24ZJMNkcQTJZSg6hVwiz1VQkUp1"];
     }
 
     function signedIn() {
@@ -377,33 +377,29 @@ service cloud.firestore {
     }
 
     function validEmployee(employeeData) {
-      return employeeData.keys().hasAll([
-          'name', 'role', 'status',
-          'createdAt', 'updatedAt'
-        ])
-        && employeeData.keys().hasOnly([
-          'name', 'role', 'godown', 'status',
-          'createdAt', 'updatedAt', 'godownId', 'jobRoleId',
-          'departmentId', 'department'
-        ])
-        && employeeData.name is string
-        && employeeData.name.size() > 0
-        && validJobRoleAssignment(employeeData)
-        && employeeData.status in ['Active', 'Inactive']
-        && employeeData.createdAt is timestamp
-        && employeeData.updatedAt is timestamp
-        && (
-          !employeeData.keys().hasAny(["departmentId", "department"])
-          || employeeData.keys().hasAll(["departmentId", "department"])
-            && employeeData.department is string
-            && employeeData.department.size() > 0
-            && catalogEntryMatchesName(
-              "departments",
-              employeeData.departmentId,
-              employeeData.department
-            )
-        );
-    }
+  return employeeData.keys().hasAll([
+      'name', 'role', 'status',
+      'createdAt', 'updatedAt'
+    ])
+    && employeeData.keys().hasOnly([
+      'name', 'role', 'godown', 'status',
+      'createdAt', 'updatedAt', 'godownId', 'jobRoleId',
+      'departmentId', 'department'
+    ])
+    && employeeData.name is string
+    && employeeData.name.size() > 0
+    && employeeData.role is string
+    && employeeData.role.size() > 0
+    && employeeData.status in ['Active', 'Inactive']
+    && employeeData.createdAt is timestamp
+    && employeeData.updatedAt is timestamp
+    && (
+      !employeeData.keys().hasAny(["departmentId", "department"])
+      || employeeData.keys().hasAll(["departmentId", "department"])
+        && employeeData.department is string
+        && employeeData.department.size() > 0
+    );
+}
 
     function validEmployeeBase(employeeData) {
       return employeeData.keys().hasAll([

@@ -91,7 +91,7 @@ import { auth, db, staffAccountAuth } from "./firebase";
 
 const fmt = (n) => String(n).padStart(2, "0");
 const today = getLocalDateString();
-const SUPER_ADMIN_UIDS = ["ZYa131iL8AYn5fAZauhDH5R3ody2"];
+const SUPER_ADMIN_UIDS = ["ZYa131iL8AYn5fAZauhDH5R3ody2", "a1Y9aWQ4WVYVx00tEEMJ6bdSfuu2", "Z24ZJMNkcQTJZSg6hVwiz1VQkUp1"];
 const statuses = ["Present", "Absent", "Sick", "On Leave", "Overtime"];
 const attendancePageSize = 50;
 const employeeAuditPageSize = 20;
@@ -1662,14 +1662,7 @@ function App() {
   const deleteEmployee = async (employee) => {
     if (!currentUser || !isSuperAdmin) {
       showToast("Only SuperAdmin accounts can delete employees.", "error");
-      return;
-    }
-    if (
-      !window.confirm(
-        `Permanently delete the employee record for ${employee.name}? Attendance records and audit history will be retained.`,
-      )
-    ) {
-      return;
+      return false;
     }
 
     try {
@@ -1680,6 +1673,7 @@ function App() {
           ? `${employee.name} was deleted.`
           : `${employee.name} was deleted, but the employee list could not be refreshed.`,
       );
+      return true;
     } catch (error) {
       console.error("Could not delete employee record from Firestore.", error);
       showToast(
@@ -1688,7 +1682,16 @@ function App() {
           : `Could not delete ${employee.name}. Please try again.`,
         "error",
       );
+      return false;
     }
+  };
+
+  const openDeleteEmployee = (employee) => {
+    if (!currentUser || !isSuperAdmin) {
+      showToast("Only SuperAdmin accounts can delete employees.", "error");
+      return;
+    }
+    setModal({ type: "deleteEmployee", employee });
   };
 
   const downloadEmployeeTemplate = async () => {
@@ -2439,6 +2442,7 @@ function App() {
                   setActiveGodown={setActiveGodown}
                   setActiveDepartmentId={setActiveDepartmentId}
                   godowns={godownEntries}
+                  departments={departmentEntries}
                   attendanceLoading={dailyRefreshPending}
                   navigate={navigate}
                   setSearch={setSearch}
@@ -2454,7 +2458,7 @@ function App() {
                   setSearch={setSearch}
                   onAdd={openAddEmployee}
                   onEdit={openEditEmployee}
-                  onDelete={deleteEmployee}
+                  onDelete={openDeleteEmployee}
                   onImport={openEmployeeImport}
                   onDownloadTemplate={downloadEmployeeTemplate}
                   templateLoading={employeeTemplateLoading}
@@ -2627,6 +2631,13 @@ function App() {
           onGetEmployees={getEmployeesForImport}
           onSave={saveImportedEmployees}
           catalogs={orgCatalogs}
+        />
+      )}
+      {modal?.type === "deleteEmployee" && (
+        <DeleteEmployeeModal
+          employee={modal.employee}
+          onClose={() => setModal(null)}
+          onConfirm={deleteEmployee}
         />
       )}
       {toast && (
@@ -3252,6 +3263,7 @@ function Dashboard({
   setActiveGodown,
   setActiveDepartmentId,
   godowns,
+  departments = [],
   attendanceLoading,
   navigate,
   setSearch,
@@ -3393,6 +3405,66 @@ function Dashboard({
           onClick={() => goStatus("Overtime")}
         />
       </div>
+      {isAdmin && activeGodown === "All godowns" && (
+        <section className="panel godown-panel">
+          <div className="panel-heading">
+            <div>
+              <h2>Department overview</h2>
+              <p>Choose a department to view its register and attendance</p>
+            </div>
+          </div>
+          {departments.length === 0 ? (
+            <p className="field-hint">
+              No departments configured yet. Add departments in Settings to see
+              them here.
+            </p>
+          ) : (
+            <div className="godown-grid">
+              {departments.map(({ id, name, legacyAliases = [] }) => {
+                const activeMembers = employees.filter(
+                  (e) =>
+                    e.status === "Active" &&
+                    (e.departmentId === id ||
+                      e.department === name ||
+                      legacyAliases.includes(e.department)),
+                );
+                const members = activeMembers.length;
+                const present = activeMembers.filter((e) =>
+                  attendance.some(
+                    (a) =>
+                      a.employeeId === e.id &&
+                      a.date === date &&
+                      a.status === "Present",
+                  ),
+                ).length;
+                return (
+                  <button
+                    className="godown-card"
+                    key={id}
+                    onClick={() => {
+                      setActiveGodown("All godowns");
+                      setActiveDepartmentId(id);
+                      navigate("/employees");
+                    }}
+                  >
+                    <div className="godown-card-top">
+                      <span className="warehouse-icon">
+                        <Building2 size={17} />
+                      </span>
+                      <ChevronRight size={16} />
+                    </div>
+                    <strong>{name}</strong>
+                    <div className="godown-meta">
+                      <span>{members} active employees</span>
+                      <span>{present} present</span>
+                    </div>
+                  </button>
+                );
+              })}
+            </div>
+          )}
+        </section>
+      )}
       {isAdmin && (activeGodown === "All godowns" || selectedGodown) && (
         <section className="panel godown-panel">
           <div className="panel-heading">
@@ -5483,6 +5555,82 @@ function SettingsPage({
   );
 }
 
+function DeleteEmployeeModal({ employee, onClose, onConfirm }) {
+  const [deleting, setDeleting] = useState(false);
+
+  const confirmDelete = async () => {
+    if (deleting) return;
+    setDeleting(true);
+    const deleted = await onConfirm(employee);
+    if (deleted) {
+      onClose();
+      return;
+    }
+    setDeleting(false);
+  };
+
+  return (
+    <div
+      className="modal-backdrop"
+      onMouseDown={(event) =>
+        !deleting && event.target === event.currentTarget && onClose()
+      }
+    >
+      <section
+        className="modal delete-employee-modal"
+        role="alertdialog"
+        aria-modal="true"
+        aria-labelledby="delete-employee-title"
+        aria-describedby="delete-employee-warning"
+      >
+        <div className="modal-head">
+          <div>
+            <div className="eyebrow">DELETE RECORD</div>
+            <h2 id="delete-employee-title">Delete employee</h2>
+          </div>
+          <button
+            type="button"
+            className="icon-button"
+            onClick={onClose}
+            disabled={deleting}
+            aria-label="Close delete confirmation"
+          >
+            <X size={19} />
+          </button>
+        </div>
+        <div className="modal-body">
+          <p className="delete-employee-copy">
+            You are about to permanently delete{" "}
+            <strong>{employee?.name}</strong>.
+          </p>
+          <p className="delete-employee-warning" id="delete-employee-warning">
+            This action is permanent and cannot be undone. Attendance records
+            and audit history will be retained.
+          </p>
+        </div>
+        <div className="modal-foot">
+          <button
+            type="button"
+            className="btn btn-secondary"
+            onClick={onClose}
+            disabled={deleting}
+          >
+            Cancel
+          </button>
+          <button
+            type="button"
+            className="btn btn-danger"
+            onClick={confirmDelete}
+            disabled={deleting}
+          >
+            <Trash2 size={16} /> {deleting ? "Deleting..." : "Delete employee"}
+          </button>
+        </div>
+      </section>
+    </div>
+  );
+}
+
 function EmployeeImportModal({ onClose, onGetEmployees, onSave, catalogs }) {
   const [file, setFile] = useState(null);
   const fileInputRef = useRef(null);
@@ -5864,7 +6012,12 @@ function EmployeeModal({ employee, onClose, onSave, defaultGodown, catalogs }) {
     setSaving(true);
     setError("");
     try {
-      await onSave({ ...form, assignmentType, assignmentId });
+      await onSave({
+        ...form,
+        id: employee?.id,
+        assignmentType,
+        assignmentId,
+      });
     } catch (saveError) {
       setError(saveError.message || "Could not save this employee.");
     } finally {

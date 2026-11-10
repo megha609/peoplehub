@@ -374,9 +374,13 @@ select:focus-visible {
     color 160ms ease;
 }
 
-.icon-button:hover {
+.icon-button:hover:not(:disabled) {
   background: #eaf4ef;
   color: var(--green-dark);
+}
+
+.icon-button:disabled {
+  cursor: not-allowed;
 }
 
 .notification-button {
@@ -459,12 +463,12 @@ select:focus-visible {
     transform 160ms ease;
 }
 
-.btn:hover {
+.btn:hover:not(:disabled) {
   transform: translateY(-1px);
 }
 
 .btn:disabled {
-  cursor: wait;
+  cursor: not-allowed;
   opacity: 0.65;
   transform: none;
 }
@@ -475,7 +479,7 @@ select:focus-visible {
   box-shadow: 0 5px 12px rgb(22 133 109 / 20%);
 }
 
-.btn-primary:hover {
+.btn-primary:hover:not(:disabled) {
   background: linear-gradient(115deg, #14765f, #0d644f);
   box-shadow: 0 7px 16px rgb(22 133 109 / 26%);
 }
@@ -486,9 +490,47 @@ select:focus-visible {
   color: #536b65;
 }
 
-.btn-secondary:hover {
+.btn-secondary:hover:not(:disabled) {
   background: #f6faf8;
   border-color: #c6dbd0;
+}
+
+.btn-danger {
+  background: #b3402f;
+  color: #fff;
+  box-shadow: 0 5px 12px rgb(179 64 47 / 20%);
+}
+
+.btn-danger:hover:not(:disabled) {
+  background: #9c3627;
+  box-shadow: 0 7px 16px rgb(179 64 47 / 26%);
+}
+
+.delete-employee-modal {
+  width: min(100%, 440px);
+}
+
+.delete-employee-copy {
+  margin: 0;
+  color: #345148;
+  font-size: 12px;
+  line-height: 1.6;
+}
+
+.delete-employee-copy strong {
+  color: #203e43;
+}
+
+.delete-employee-warning {
+  margin: 0;
+  padding: 11px 13px;
+  border: 1px solid #f3d9d3;
+  border-radius: 9px;
+  background: #fdf3f1;
+  color: #a3483e;
+  font-size: 10px;
+  font-weight: 600;
+  line-height: 1.6;
 }
 
 .btn-small {
@@ -698,8 +740,12 @@ select:focus-visible {
   font-weight: 700;
 }
 
-.text-button:hover {
+.text-button:hover:not(:disabled) {
   color: var(--green-dark);
+}
+
+.text-button:disabled {
+  cursor: not-allowed;
 }
 
 .godown-grid {
@@ -1066,6 +1112,12 @@ tbody tr:hover {
   background: #fff;
   color: #50665e;
   font-size: 10px;
+}
+
+.staff-godown-select:disabled,
+.attendance-select:disabled,
+.staff-account-role-select:disabled {
+  cursor: not-allowed;
 }
 
 .row-action {
@@ -1449,10 +1501,14 @@ tbody tr:hover {
     background 160ms ease;
 }
 
-.mini-stat:hover,
+.mini-stat:hover:not(:disabled),
 .mini-stat.active {
   border-color: #acd8c4;
   background: #f3faf6;
+}
+
+.mini-stat:disabled {
+  cursor: not-allowed;
 }
 
 .mini-stat:focus-visible {
@@ -2004,7 +2060,7 @@ tbody tr:hover {
     transform 160ms ease;
 }
 
-.employee-import-file::file-selector-button:hover {
+.employee-import-file::file-selector-button:hover:not(:disabled) {
   transform: translateY(-1px);
   background: #f6faf8;
   border-color: #c6dbd0;
@@ -2212,6 +2268,19 @@ tbody tr:hover {
   .catalog-entry input {
     flex-basis: 100%;
     max-width: none;
+  }
+
+  .catalog-add-form {
+    flex-wrap: wrap;
+  }
+
+  .catalog-add-form input {
+    flex-basis: 100%;
+  }
+
+  .catalog-add-form .btn {
+    width: 100%;
+    justify-content: center;
   }
 
   .footer {
@@ -2652,9 +2721,13 @@ tbody tr:hover {
   color: #82968b;
 }
 
-.password-toggle:hover {
+.password-toggle:hover:not(:disabled) {
   background: #eff6f1;
   color: var(--green-dark);
+}
+
+.password-toggle:disabled {
+  cursor: not-allowed;
 }
 
 .auth-form-options {
@@ -2687,10 +2760,15 @@ tbody tr:hover {
   font-weight: 700;
 }
 
-.auth-link:hover,
-.auth-back:hover {
+.auth-link:hover:not(:disabled),
+.auth-back:hover:not(:disabled) {
   color: #0c604e;
   text-decoration: underline;
+}
+
+.auth-link:disabled,
+.auth-back:disabled {
+  cursor: not-allowed;
 }
 
 .auth-submit {
@@ -2967,6 +3045,45 @@ tbody tr:hover {
 .catalog-entry input {
   min-width: 0;
   flex: 1;
+  height: 39px;
+  padding: 0 11px;
+  border: 1px solid #dce8e2;
+  border-radius: 8px;
+  background: #fff;
+  color: #345148;
+  font-size: 11px;
+  transition:
+    border-color 160ms ease,
+    box-shadow 160ms ease;
+}
+
+.catalog-add-form input::placeholder,
+.catalog-entry input::placeholder {
+  color: #a0aea7;
+}
+
+.catalog-add-form input:hover,
+.catalog-entry input:hover {
+  border-color: #b8dcca;
+}
+
+.catalog-add-form input:focus,
+.catalog-entry input:focus {
+  outline: none;
+  border-color: var(--green);
+  box-shadow: 0 0 0 3px rgb(22 133 109 / 16%);
+}
+
+.catalog-add-form input:disabled,
+.catalog-entry input:disabled {
+  background: #f3f7f5;
+  color: #879b91;
+}
+
+.catalog-add-form .btn,
+.catalog-entry .btn {
+  min-height: 39px;
+  flex-shrink: 0;
 }
 
 .catalog-entry-list {
