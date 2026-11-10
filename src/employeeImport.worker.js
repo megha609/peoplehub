@@ -113,7 +113,7 @@ async function createAttendanceReport({
     [],
     ["Start date", from],
     ["End date", to],
-    ["Godown", godown],
+    ["Scope", godown],
     [],
     ["Total attendance records", records.length],
     [],
@@ -142,7 +142,7 @@ async function createAttendanceReport({
   details.columns = [
     { header: "DATE", key: "date", width: 18 },
     { header: "EMPLOYEE", key: "employee", width: 32 },
-    { header: "GODOWN", key: "godown", width: 36 },
+    { header: "ASSIGNMENT", key: "godown", width: 36 },
     { header: "STATUS", key: "status", width: 18 },
   ];
   details.views = [{ state: "frozen", ySplit: 1 }];
@@ -157,7 +157,8 @@ async function createAttendanceReport({
     details.addRow({
       date: new Date(`${record.date}T00:00:00Z`),
       employee: record.employeeName || "Unknown employee",
-      godown: record.godown || "Unknown godown",
+      godown:
+        record.godown || record.departmentName || "Unknown assignment",
       status: record.status,
     });
   }
@@ -212,16 +213,23 @@ async function parseWorkbook(fileBuffer, existingEmployees, catalogs) {
       : [raw.firstName, raw.secondName, raw.thirdName].filter(Boolean).join(" ");
     const name = normalizeDisplayName(nameInput);
     const role = findCatalogValue(raw.role, catalogs?.jobRoles);
-    const godown = findCatalogValue(raw.godown, catalogs?.godowns);
-    const department = raw.department
+    const hasGodown = Boolean(raw.godown);
+    const hasDepartment = Boolean(raw.department);
+    const godown = hasGodown
+      ? findCatalogValue(raw.godown, catalogs?.godowns)
+      : null;
+    const department = hasDepartment
       ? findCatalogValue(raw.department, catalogs?.departments)
       : null;
     const status = findConfiguredValue(raw.status, employeeStatuses);
     const errors = [];
     if (!name) errors.push("Name is required.");
     if (!role) errors.push("Job role must match an active configured job role.");
-    if (!godown) errors.push("Godown must match an active configured godown.");
-    if (raw.department && !department) {
+    if (hasGodown === hasDepartment) {
+      errors.push("Populate exactly one of Godown or Department.");
+    } else if (hasGodown && !godown) {
+      errors.push("Godown must match an active configured godown.");
+    } else if (hasDepartment && !department) {
       errors.push("Department must match an active configured department.");
     }
     if (!status) errors.push("Status must be Active or Inactive.");
@@ -243,10 +251,15 @@ async function parseWorkbook(fileBuffer, existingEmployees, catalogs) {
         name,
         role: role?.name || raw.role,
         roleId: role?.id || "",
-        godown: godown?.name || raw.godown,
+        godown: godown?.name || "",
         godownId: godown?.id || "",
         department: department?.name || "",
         departmentId: department?.id || "",
+        assignment: department
+          ? `Department: ${department.name}`
+          : godown
+            ? `Godown: ${godown.name}`
+            : "",
         status: status || raw.status,
       },
       errors,
@@ -285,7 +298,9 @@ function resolveColumns(worksheet) {
   if (!hasFullName && !(columns.firstName && columns.secondName)) {
     throw new Error("Missing name columns. Include Name, or both First Name and Second Name.");
   }
-  const missing = ["role", "godown", "status"].filter((field) => !columns[field]);
+  const missing = ["role", "godown", "department", "status"].filter(
+    (field) => !columns[field],
+  );
   if (missing.length) {
     throw new Error(`Missing required column${missing.length > 1 ? "s" : ""}: ${missing.join(", ")}.`);
   }

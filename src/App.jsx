@@ -208,22 +208,15 @@ function createEmployeeAuditQuery(
   if (role === "Staff") {
     constraints.push(
       godownId
-        ? or(
-            where("godown", "==", godown),
-            where("godownId", "==", godownId),
-          )
+        ? or(where("godown", "==", godown), where("godownId", "==", godownId))
         : where("godown", "==", godown),
     );
   }
   if (range.from) {
-    constraints.push(
-      where("changedAt", ">=", localDateBoundary(range.from)),
-    );
+    constraints.push(where("changedAt", ">=", localDateBoundary(range.from)));
   }
   if (range.to) {
-    constraints.push(
-      where("changedAt", "<", localDateBoundary(range.to, 1)),
-    );
+    constraints.push(where("changedAt", "<", localDateBoundary(range.to, 1)));
   }
   constraints.push(orderBy("changedAt", "desc"));
   if (cursor) constraints.push(startAfter(cursor));
@@ -240,7 +233,8 @@ function App() {
   const [authLoading, setAuthLoading] = useState(true);
   const [authError, setAuthError] = useState("");
   const [activeGodown, setActiveGodown] = useState("All godowns");
-  const [activeDepartmentId, setActiveDepartmentId] = useState("All departments");
+  const [activeDepartmentId, setActiveDepartmentId] =
+    useState("All departments");
   const [orgCatalogs, setOrgCatalogs] = useState(seededOrgCatalogs);
   const [orgCatalogStored, setOrgCatalogStored] = useState(false);
   const [orgCatalogLoading, setOrgCatalogLoading] = useState(false);
@@ -299,6 +293,10 @@ function App() {
   const godownEntries = catalogEntries(orgCatalogs.godowns);
   const jobRoleEntries = catalogEntries(orgCatalogs.jobRoles);
   const departmentEntries = catalogEntries(orgCatalogs.departments);
+  const activeScopeLabel =
+    isAdmin && activeDepartmentId !== "All departments"
+      ? orgCatalogs.departments[activeDepartmentId]?.name || "All departments"
+      : scopedGodown;
   const currentUserGodownName =
     catalogEntries(orgCatalogs.godowns, { includeArchived: true }).find(
       (entry) => entry.id === currentUser?.godownId,
@@ -465,78 +463,6 @@ function App() {
     }
   };
 
-  const deleteCatalogEntry = async (category, entry) => {
-    if (!isSuperAdmin) {
-      throw new Error("Only the protected SuperAdmin can manage settings.");
-    }
-    const labels = [...new Set([entry.name, ...(entry.legacyAliases || [])])];
-    const references = [];
-    const inspect = (collectionName, field, values) => {
-      const chunks = [];
-      for (let offset = 0; offset < values.length; offset += 30) {
-        chunks.push(values.slice(offset, offset + 30));
-      }
-      for (const chunk of chunks) {
-        references.push(
-          getDocs(
-            query(
-              collection(db, collectionName),
-              where(field, chunk.length === 1 ? "==" : "in", chunk.length === 1 ? chunk[0] : chunk),
-              limit(1),
-            ),
-          ),
-        );
-      }
-    };
-    if (category === "godowns") {
-      inspect("employees", "godownId", [entry.id]);
-      inspect("employees", "godown", labels);
-      inspect("users", "godownId", [entry.id]);
-      inspect("users", "godown", labels);
-      inspect("attendance", "godownId", [entry.id]);
-      inspect("attendance", "godown", labels);
-      inspect("attendanceAudit", "godownId", [entry.id]);
-      inspect("attendanceAudit", "godown", labels);
-    } else if (category === "jobRoles") {
-      inspect("employees", "jobRoleId", [entry.id]);
-      inspect("employees", "role", labels);
-      inspect("attendance", "jobRoleId", [entry.id]);
-      inspect("attendance", "role", labels);
-      inspect("attendanceAudit", "jobRoleId", [entry.id]);
-      inspect("attendanceAudit", "role", labels);
-    } else {
-      inspect("employees", "departmentId", [entry.id]);
-      inspect("employees", "department", labels);
-      inspect("attendance", "departmentId", [entry.id]);
-      inspect("attendance", "departmentName", labels);
-      inspect("attendanceAudit", "departmentId", [entry.id]);
-      inspect("attendanceAudit", "departmentName", labels);
-    }
-
-    try {
-      const snapshots = await Promise.all(references);
-      if (snapshots.some((snapshot) => !snapshot.empty)) {
-        throw new Error(
-          "This entry is referenced by existing records. Archive it instead to preserve history.",
-        );
-      }
-      const nextCatalogs = {
-        ...orgCatalogs,
-        [category]: Object.fromEntries(
-          Object.entries(orgCatalogs[category]).filter(
-            ([id]) => id !== entry.id,
-          ),
-        ),
-      };
-      await saveOrgCatalogs(nextCatalogs);
-    } catch (error) {
-      console.error("Could not safely delete catalog entry.", error);
-      throw error instanceof Error
-        ? error
-        : new Error("Could not check existing references before deletion.");
-    }
-  };
-
   const loadEmployees = useCallback(async () => {
     const requestId = ++employeeRequestId.current;
     if (!currentUser) {
@@ -578,10 +504,12 @@ function App() {
           snapshot.docs.map((employeeDoc) => [employeeDoc.id, employeeDoc]),
         ),
       );
-      setEmployees([...employeeDocs.values()].map((employeeDoc) => ({
+      setEmployees(
+        [...employeeDocs.values()].map((employeeDoc) => ({
           id: employeeDoc.id,
           ...employeeDoc.data(),
-        })));
+        })),
+      );
       setEmployeesLoading(false);
       return true;
     } catch (error) {
@@ -677,17 +605,22 @@ function App() {
 
       const attendanceDocs = new Map(
         snapshots.flatMap((snapshot) =>
-          snapshot.docs.map((attendanceDoc) => [attendanceDoc.id, attendanceDoc]),
+          snapshot.docs.map((attendanceDoc) => [
+            attendanceDoc.id,
+            attendanceDoc,
+          ]),
         ),
       );
-      setAttendance([...attendanceDocs.values()]
-        .sort((left, right) =>
-          String(left.data().date).localeCompare(String(right.data().date)),
-        )
-        .map((attendanceDoc) => ({
-          id: attendanceDoc.id,
-          ...attendanceDoc.data(),
-        })));
+      setAttendance(
+        [...attendanceDocs.values()]
+          .sort((left, right) =>
+            String(left.data().date).localeCompare(String(right.data().date)),
+          )
+          .map((attendanceDoc) => ({
+            id: attendanceDoc.id,
+            ...attendanceDoc.data(),
+          })),
+      );
       setCalendarDataScopeKey(attendanceScopeKey);
       setCalendarDataQueryKey(calendarQueryKey);
       return true;
@@ -867,7 +800,12 @@ function App() {
         type: "report",
         from: reportFrom,
         to: reportTo,
-        godown: scopedGodown === "All godowns" ? "All Godowns" : scopedGodown,
+        godown:
+          activeDepartmentId !== "All departments"
+            ? `Department: ${orgCatalogs.departments[activeDepartmentId]?.name || activeDepartmentId}`
+            : scopedGodown === "All godowns"
+              ? "All Godowns"
+              : scopedGodown,
         records: validRecords,
         statuses,
       });
@@ -966,13 +904,18 @@ function App() {
 
       const attendanceDocs = new Map(
         snapshots.flatMap((snapshot) =>
-          snapshot.docs.map((attendanceDoc) => [attendanceDoc.id, attendanceDoc]),
+          snapshot.docs.map((attendanceDoc) => [
+            attendanceDoc.id,
+            attendanceDoc,
+          ]),
         ),
       );
-      setDailyAttendance([...attendanceDocs.values()].map((attendanceDoc) => ({
+      setDailyAttendance(
+        [...attendanceDocs.values()].map((attendanceDoc) => ({
           id: attendanceDoc.id,
           ...attendanceDoc.data(),
-        })));
+        })),
+      );
       setDailyDataKey(dailyAttendanceKey);
       return true;
     } catch (error) {
@@ -1137,7 +1080,9 @@ function App() {
           role !== "Staff" ||
           (typeof profile?.godown === "string" &&
             (typeof profile?.godownId === "string" ||
-              Boolean(findCatalogEntryByName(orgCatalogs.godowns, profile.godown))));
+              Boolean(
+                findCatalogEntryByName(orgCatalogs.godowns, profile.godown),
+              )));
 
         if (
           !profileSnapshot.exists() ||
@@ -1239,7 +1184,12 @@ function App() {
             role !== "Staff" ||
             (typeof profile.godown === "string" &&
               (typeof profile.godownId === "string" ||
-                Boolean(findCatalogEntryByName(seededOrgCatalogs.godowns, profile.godown))));
+                Boolean(
+                  findCatalogEntryByName(
+                    seededOrgCatalogs.godowns,
+                    profile.godown,
+                  ),
+                )));
           if (profile.active !== true || !validRole || !validGodown) {
             setAuthError(
               "Your account is inactive or its access profile is invalid. Contact an administrator.",
@@ -1470,8 +1420,8 @@ function App() {
     if (
       !["Staff", "Admin"].includes(role) ||
       (role === "Staff" &&
-        (changingAssignment &&
-          (!godownEntry || (changingGodown && !godownEntry.active)))) ||
+        changingAssignment &&
+        (!godownEntry || (changingGodown && !godownEntry.active))) ||
       (role === "Admin" && godown !== null) ||
       (Object.hasOwn(changes, "active") && typeof changes.active !== "boolean")
     ) {
@@ -1515,8 +1465,7 @@ function App() {
     try {
       const profileChanges = {
         ...changes,
-        ...(Object.hasOwn(changes, "role") ||
-        Object.hasOwn(changes, "godownId")
+        ...(Object.hasOwn(changes, "role") || Object.hasOwn(changes, "godownId")
           ? {
               role,
               godown,
@@ -1583,7 +1532,7 @@ function App() {
         ? scopedEmployees
         : !department
           ? []
-          : scopedEmployees.filter((employee) => {
+          : employees.filter((employee) => {
               const acceptedNames = [
                 department.name,
                 ...(department.legacyAliases || []),
@@ -1617,17 +1566,34 @@ function App() {
             entry.id === employee.departmentId ||
             entry.name === employee.department ||
             (entry.legacyAliases || []).includes(employee.department),
-        )?.name || employee.department || "",
+        )?.name ||
+        employee.department ||
+        "",
+      displayAssignment: employee.departmentId
+        ? `Department: ${
+            catalogEntries(orgCatalogs.departments, {
+              includeArchived: true,
+            }).find((entry) => entry.id === employee.departmentId)?.name ||
+            employee.department
+          }`
+        : `Godown: ${
+            catalogEntries(orgCatalogs.godowns, {
+              includeArchived: true,
+            }).find((entry) => entry.id === employee.godownId)?.name ||
+            employee.godown
+          }`,
     }));
   }, [
     activeDepartmentId,
+    employees,
     orgCatalogs.departments,
     orgCatalogs.jobRoles,
     orgCatalogs.godowns,
     scopedEmployees,
   ]);
   const departmentEmployeeIds = useMemo(
-    () => new Set(departmentScopedEmployees.map((employee) => String(employee.id))),
+    () =>
+      new Set(departmentScopedEmployees.map((employee) => String(employee.id))),
     [departmentScopedEmployees],
   );
   const departmentScopedDailyAttendance = useMemo(() => {
@@ -1637,11 +1603,7 @@ function App() {
         ? record.departmentId === activeDepartmentId
         : departmentEmployeeIds.has(String(record.employeeId)),
     );
-  }, [
-    activeDepartmentId,
-    departmentEmployeeIds,
-    visibleDailyAttendance,
-  ]);
+  }, [activeDepartmentId, departmentEmployeeIds, visibleDailyAttendance]);
   const departmentScopedCalendarAttendance = useMemo(() => {
     if (activeDepartmentId === "All departments") {
       return visibleCalendarAttendance;
@@ -1651,11 +1613,7 @@ function App() {
         ? record.departmentId === activeDepartmentId
         : departmentEmployeeIds.has(String(record.employeeId)),
     );
-  }, [
-    activeDepartmentId,
-    departmentEmployeeIds,
-    visibleCalendarAttendance,
-  ]);
+  }, [activeDepartmentId, departmentEmployeeIds, visibleCalendarAttendance]);
   const visibleEmployees = useMemo(
     () =>
       departmentScopedEmployees.filter((employee) =>
@@ -1666,21 +1624,17 @@ function App() {
     [departmentScopedEmployees, search],
   );
   const departmentScopedReportAttendance = useMemo(() => {
-    if (activeDepartmentId === "All departments") return visibleReportAttendance;
+    if (activeDepartmentId === "All departments")
+      return visibleReportAttendance;
     const employeeIds = new Set(
       departmentScopedEmployees.map((employee) => String(employee.id)),
     );
-    return visibleReportAttendance.filter(
-      (record) =>
-        record.departmentId
-          ? record.departmentId === activeDepartmentId
-          : employeeIds.has(String(record.employeeId)),
+    return visibleReportAttendance.filter((record) =>
+      record.departmentId
+        ? record.departmentId === activeDepartmentId
+        : employeeIds.has(String(record.employeeId)),
     );
-  }, [
-    activeDepartmentId,
-    departmentScopedEmployees,
-    visibleReportAttendance,
-  ]);
+  }, [activeDepartmentId, departmentScopedEmployees, visibleReportAttendance]);
 
   const attendanceRows = useMemo(
     () =>
@@ -1800,13 +1754,14 @@ function App() {
           batch.set(employeeRef, {
             name: row.name,
             role: row.role,
-            ...(orgCatalogStored ? { jobRoleId: row.roleId } : {}),
-            godown: row.godown,
-            ...(orgCatalogStored ? { godownId: row.godownId } : {}),
-            ...(orgCatalogStored && row.departmentId
+            jobRoleId: row.roleId,
+            ...(row.godownId
+              ? { godown: row.godown, godownId: row.godownId }
+              : {}),
+            ...(row.departmentId
               ? {
                   departmentId: row.departmentId,
-                  departmentName: row.department,
+                  department: row.department,
                 }
               : {}),
             status: row.status,
@@ -1851,38 +1806,47 @@ function App() {
 
     const name = typeof data.name === "string" ? data.name.trim() : "";
     const role = typeof data.role === "string" ? data.role.trim() : "";
-    const godown = isAdmin ? data.godown : modal?.employee?.godown;
-    const godownEntry = findCatalogEntryByName(orgCatalogs.godowns, godown);
-    const roleEntry = findCatalogEntryByName(orgCatalogs.jobRoles, role);
-    const departmentEntry = data.department
-      ? findCatalogEntryByName(orgCatalogs.departments, data.department)
-      : null;
+    const roleEntry =
+      catalogEntries(orgCatalogs.jobRoles, { includeArchived: true }).find(
+        (entry) => entry.id === data.jobRoleId,
+      ) || findCatalogEntryByName(orgCatalogs.jobRoles, role);
     const existingEmployee = modal?.employee;
-    const sameArchivedGodown =
-      existingEmployee?.godown === godown &&
-      (!existingEmployee?.godownId ||
-        existingEmployee.godownId === godownEntry?.id);
+    const assignmentType = data.assignmentType;
+    const assignmentEntry = catalogEntries(
+      orgCatalogs[assignmentType === "department" ? "departments" : "godowns"],
+      { includeArchived: true },
+    ).find((entry) => entry.id === data.assignmentId);
+    const existingAssignmentId =
+      assignmentType === "department"
+        ? existingEmployee?.departmentId
+        : existingEmployee?.godownId;
+    const existingAssignmentName =
+      assignmentType === "department"
+        ? existingEmployee?.department
+        : existingEmployee?.godown;
+    const sameArchivedAssignment =
+      !assignmentEntry?.active &&
+      (existingAssignmentId === assignmentEntry?.id ||
+        (!existingAssignmentId &&
+          (existingAssignmentName === assignmentEntry?.name ||
+            (assignmentEntry?.legacyAliases || []).includes(
+              existingAssignmentName,
+            ))));
     const sameArchivedRole =
       existingEmployee?.role === role &&
       (!existingEmployee?.jobRoleId ||
         existingEmployee.jobRoleId === roleEntry?.id);
-    const sameArchivedDepartment =
-      (!existingEmployee?.department ||
-        existingEmployee.department === data.department) &&
-      (!existingEmployee?.departmentId ||
-        existingEmployee.departmentId === departmentEntry?.id);
     if (
       !name ||
       !role ||
-      (!godownEntry?.active && !sameArchivedGodown) ||
+      !["godown", "department"].includes(assignmentType) ||
+      !assignmentEntry ||
+      (!assignmentEntry.active && !sameArchivedAssignment) ||
       (!roleEntry?.active && !sameArchivedRole) ||
-      (data.department &&
-        !departmentEntry?.active &&
-        !sameArchivedDepartment) ||
       !["Active", "Inactive"].includes(data.status)
     ) {
       throw new Error(
-        "Enter a name, job role, valid godown, and employment status.",
+        "Enter a name, job role, exactly one valid active organisational assignment, and employment status.",
       );
     }
 
@@ -1890,33 +1854,34 @@ function App() {
       name,
       role,
       ...(roleEntry &&
-      ((orgCatalogStored && roleEntry.active) || existingEmployee?.jobRoleId)
+      (roleEntry.active || existingEmployee?.jobRoleId === roleEntry.id)
         ? { jobRoleId: roleEntry.id }
         : {}),
       status: data.status,
       updatedAt: serverTimestamp(),
     };
-    if (isAdmin) {
-      employeeData.godown = godown;
+    if (assignmentType === "godown") {
+      employeeData.godown =
+        sameArchivedAssignment && existingAssignmentName
+          ? existingAssignmentName
+          : assignmentEntry.name;
       if (
-        godownEntry &&
-        ((orgCatalogStored && godownEntry.active) ||
-          existingEmployee?.godownId)
+        assignmentEntry.active ||
+        existingEmployee?.godownId === assignmentEntry.id
       ) {
-        employeeData.godownId = godownEntry.id;
+        employeeData.godownId = assignmentEntry.id;
       }
-    }
-    if (
-      data.department &&
-      departmentEntry &&
-      ((orgCatalogStored && departmentEntry.active) ||
-        existingEmployee?.departmentId)
-    ) {
-      employeeData.departmentId = departmentEntry.id;
-      employeeData.department = departmentEntry.name;
-    } else if (data.id && !data.department) {
-      employeeData.departmentId = deleteField();
-      employeeData.department = deleteField();
+      if (data.id) {
+        employeeData.departmentId = deleteField();
+        employeeData.department = deleteField();
+      }
+    } else {
+      employeeData.departmentId = assignmentEntry.id;
+      employeeData.department = assignmentEntry.name;
+      if (data.id) {
+        employeeData.godown = deleteField();
+        employeeData.godownId = deleteField();
+      }
     }
 
     if (!data.id) {
@@ -1947,9 +1912,7 @@ function App() {
         );
       });
       if (duplicateExists) {
-        throw new Error(
-          "An employee with this name already exists in another or the same godown.",
-        );
+        throw new Error("An employee with this name already exists.");
       }
     }
 
@@ -1957,9 +1920,17 @@ function App() {
       if (data.id) {
         await updateDoc(doc(db, "employees", data.id), employeeData);
       } else {
+        const profileSnap = await getDoc(
+          doc(db, "users", auth.currentUser.uid),
+        );
+
+        console.log(
+          "FIRESTORE USER PROFILE:",
+          profileSnap.exists() ? profileSnap.data() : "USER DOCUMENT NOT FOUND",
+        );
+
         await addDoc(collection(db, "employees"), {
           ...employeeData,
-          godown,
           createdAt: serverTimestamp(),
         });
       }
@@ -2005,11 +1976,19 @@ function App() {
     const employee = employees.find(
       (record) => String(record.id) === String(employeeId),
     );
-    const employeeGodownEntry =
-      findCatalogEntryByName(orgCatalogs.godowns, employee?.godown) ||
-      catalogEntries(orgCatalogs.godowns, { includeArchived: true }).find(
-        (entry) => entry.id === employee?.godownId,
-      );
+    const employeeIsDepartmentAssigned = Boolean(employee?.departmentId);
+    const employeeAssignmentEntry = employeeIsDepartmentAssigned
+      ? catalogEntries(orgCatalogs.departments, {
+          includeArchived: true,
+        }).find((entry) => entry.id === employee.departmentId)
+      : catalogEntries(orgCatalogs.godowns, {
+          includeArchived: true,
+        }).find(
+          (entry) =>
+            entry.id === employee?.godownId ||
+            entry.name === employee?.godown ||
+            (entry.legacyAliases || []).includes(employee?.godown),
+        );
     const employeeRoleEntry =
       findCatalogEntryByName(orgCatalogs.jobRoles, employee?.role) ||
       catalogEntries(orgCatalogs.jobRoles, { includeArchived: true }).find(
@@ -2018,15 +1997,24 @@ function App() {
     if (
       !employee ||
       employee.status !== "Active" ||
-      (!employeeGodownEntry && !findCatalogEntryByName(seededOrgCatalogs.godowns, employee.godown)) ||
+      !employeeAssignmentEntry ||
       (!isAdmin &&
-        (employee.godownId && currentUser.godownId
-          ? employee.godownId !== currentUser.godownId
-          : employee.godown !== currentUser.godown)) ||
+        (employeeIsDepartmentAssigned ||
+          (employee.godownId && currentUser.godownId
+            ? employee.godownId !== currentUser.godownId
+            : employee.godown !== currentUser.godown))) ||
       (isAdmin &&
+        activeDepartmentId !== "All departments" &&
+        (!employeeIsDepartmentAssigned ||
+          employee.departmentId !== activeDepartmentId)) ||
+      (isAdmin &&
+        activeDepartmentId === "All departments" &&
         scopedGodown !== "All godowns" &&
-        employeeGodownEntry?.name !== scopedGodown &&
-        !(employeeGodownEntry?.legacyAliases || []).includes(scopedGodown))
+        (employeeIsDepartmentAssigned ||
+          (employeeAssignmentEntry.name !== scopedGodown &&
+            !(employeeAssignmentEntry.legacyAliases || []).includes(
+              scopedGodown,
+            ))))
     ) {
       setDailyAttendanceError(
         "You do not have permission to manage attendance for this employee.",
@@ -2076,14 +2064,10 @@ function App() {
           employeeId: normalizedEmployeeId,
           employeeName: employee.name,
           role: employee.role,
-          godown: employee.godown,
-          ...(employee.godownId || (orgCatalogStored && employeeGodownEntry?.id)
-            ? { godownId: employee.godownId || employeeGodownEntry.id }
-            : {}),
-          ...(employee.jobRoleId || (orgCatalogStored && employeeRoleEntry?.id)
+          ...(employee.jobRoleId || employeeRoleEntry?.id
             ? { jobRoleId: employee.jobRoleId || employeeRoleEntry.id }
             : {}),
-          ...(employee.departmentId && orgCatalogStored
+          ...(employeeIsDepartmentAssigned
             ? {
                 departmentId: employee.departmentId,
                 departmentName:
@@ -2091,7 +2075,14 @@ function App() {
                   orgCatalogs.departments[employee.departmentId]?.name ||
                   "",
               }
-            : {}),
+            : {
+                godown: employee.godown,
+                ...(employee.godownId || employeeAssignmentEntry?.id
+                  ? {
+                      godownId: employee.godownId || employeeAssignmentEntry.id,
+                    }
+                  : {}),
+              }),
           date: selectedDate,
           status,
           updatedBy,
@@ -2139,18 +2130,20 @@ function App() {
           employeeId: existingData.employeeId,
           employeeName: existingData.employeeName,
           role: existingData.role,
-          godown: existingData.godown,
-          ...(existingData.godownId
+          ...(Object.hasOwn(existingData, "godown")
+            ? { godown: existingData.godown }
+            : {}),
+          ...(Object.hasOwn(existingData, "godownId")
             ? { godownId: existingData.godownId }
             : {}),
           ...(existingData.jobRoleId
             ? { jobRoleId: existingData.jobRoleId }
             : {}),
-          ...(existingData.departmentId
-            ? {
-                departmentId: existingData.departmentId,
-                departmentName: existingData.departmentName || "",
-              }
+          ...(Object.hasOwn(existingData, "departmentId")
+            ? { departmentId: existingData.departmentId }
+            : {}),
+          ...(Object.hasOwn(existingData, "departmentName")
+            ? { departmentName: existingData.departmentName }
             : {}),
           date: existingData.date,
           changedBy: updatedBy,
@@ -2274,7 +2267,7 @@ function App() {
             />
           )}
         </nav>
-        {departmentEntries.length > 0 && (
+        {isAdmin && departmentEntries.length > 0 && (
           <div className="godown-nav department-nav">
             <div className="section-head">
               <span>DEPARTMENTS</span>
@@ -2289,6 +2282,7 @@ function App() {
                 className={`godown-link ${activeDepartmentId === department.id ? "selected" : ""}`}
                 onClick={() => {
                   setActiveDepartmentId(department.id);
+                  setActiveGodown("All godowns");
                   navigate(location.pathname);
                   setMobileOpen(false);
                 }}
@@ -2308,6 +2302,7 @@ function App() {
             <button
               className={`godown-link ${activeGodown === "All godowns" ? "selected" : ""}`}
               onClick={() => {
+                setActiveDepartmentId("All departments");
                 setActiveGodown("All godowns");
                 navigate(location.pathname);
                 setMobileOpen(false);
@@ -2321,6 +2316,7 @@ function App() {
                 key={id}
                 className={`godown-link ${activeGodown === name ? "selected" : ""}`}
                 onClick={() => {
+                  setActiveDepartmentId("All departments");
                   setActiveGodown(name);
                   navigate(location.pathname);
                   setMobileOpen(false);
@@ -2437,9 +2433,10 @@ function App() {
                   isAdmin={isAdmin}
                   currentUserRole={currentUser.role}
                   activeGodown={
-                    isAdmin ? scopedGodown : currentUserGodownName
+                    isAdmin ? activeScopeLabel : currentUserGodownName
                   }
                   setActiveGodown={setActiveGodown}
+                  setActiveDepartmentId={setActiveDepartmentId}
                   godowns={godownEntries}
                   attendanceLoading={dailyRefreshPending}
                   navigate={navigate}
@@ -2463,7 +2460,7 @@ function App() {
                   isAdmin={isAdmin}
                   isSuperAdmin={isSuperAdmin}
                   activeGodown={
-                    isAdmin ? scopedGodown : currentUserGodownName
+                    isAdmin ? activeScopeLabel : currentUserGodownName
                   }
                   loading={employeesLoading}
                   error={employeesError}
@@ -2490,7 +2487,7 @@ function App() {
                   onMark={saveAttendance}
                   isAdmin={isAdmin}
                   activeGodown={
-                    isAdmin ? scopedGodown : currentUserGodownName
+                    isAdmin ? activeScopeLabel : currentUserGodownName
                   }
                   loading={dailyRefreshPending}
                   hasCurrentData={dailyDataKey === dailyAttendanceKey}
@@ -2525,7 +2522,7 @@ function App() {
                     employees={visibleEmployees}
                     attendance={departmentScopedReportAttendance}
                     activeGodown={
-                      isAdmin ? scopedGodown : currentUserGodownName
+                      isAdmin ? activeScopeLabel : currentUserGodownName
                     }
                     from={reportFrom}
                     to={reportTo}
@@ -2589,16 +2586,13 @@ function App() {
                 <SettingsPage
                   isAdmin={isAdmin}
                   isSuperAdmin={isSuperAdmin}
-                  activeGodown={
-                    isAdmin ? scopedGodown : currentUserGodownName
-                  }
+                  activeGodown={isAdmin ? scopedGodown : currentUserGodownName}
                   catalogs={orgCatalogs}
                   catalogStored={orgCatalogStored}
                   loading={orgCatalogLoading}
                   error={orgCatalogError}
                   onRefresh={() => loadOrgCatalogs({ force: true })}
                   onSave={saveOrgCatalogs}
-                  onDeleteEntry={deleteCatalogEntry}
                 />
               }
             />
@@ -3062,7 +3056,9 @@ function CreateStaffPage({ accounts, catalogs, onCancel, onCreate }) {
                   required
                 >
                   {availableGodowns.map(({ id, name }) => (
-                    <option key={id} value={id}>{name}</option>
+                    <option key={id} value={id}>
+                      {name}
+                    </option>
                   ))}
                 </select>
                 <small>This account will only see this godown.</small>
@@ -3253,6 +3249,7 @@ function Dashboard({
   currentUserRole,
   activeGodown,
   setActiveGodown,
+  setActiveDepartmentId,
   godowns,
   attendanceLoading,
   navigate,
@@ -3266,6 +3263,7 @@ function Dashboard({
     (e) =>
       e.status === "Active" &&
       ((isAdmin && activeGodown === "All godowns") ||
+        (isAdmin && !selectedGodown) ||
         e.godown === activeGodown ||
         (selectedGodown &&
           (e.godownId === selectedGodown.id ||
@@ -3394,7 +3392,7 @@ function Dashboard({
           onClick={() => goStatus("Overtime")}
         />
       </div>
-      {isAdmin && (
+      {isAdmin && (activeGodown === "All godowns" || selectedGodown) && (
         <section className="panel godown-panel">
           <div className="panel-heading">
             <div>
@@ -3404,6 +3402,7 @@ function Dashboard({
             <button
               className="text-button"
               onClick={() => {
+                setActiveDepartmentId("All departments");
                 setActiveGodown("All godowns");
                 navigate("/employees");
               }}
@@ -3434,6 +3433,7 @@ function Dashboard({
                   className="godown-card"
                   key={id}
                   onClick={() => {
+                    setActiveDepartmentId("All departments");
                     setActiveGodown(name);
                     navigate("/employees");
                   }}
@@ -3548,7 +3548,8 @@ function EmployeeProfile({ currentUser, catalogs }) {
       ),
     )
       .then((snapshot) => {
-      if (!active || requestGeneration !== auditQueryGeneration.current) return;
+        if (!active || requestGeneration !== auditQueryGeneration.current)
+          return;
         const page = snapshot.docs.slice(0, employeeAuditPageSize);
         setAuditRecords(
           page.map((auditDoc) => ({ id: auditDoc.id, ...auditDoc.data() })),
@@ -3557,7 +3558,8 @@ function EmployeeProfile({ currentUser, catalogs }) {
         setAuditHasMore(snapshot.docs.length > employeeAuditPageSize);
       })
       .catch((loadError) => {
-        if (!active || requestGeneration !== auditQueryGeneration.current) return;
+        if (!active || requestGeneration !== auditQueryGeneration.current)
+          return;
         console.error(
           "Could not load employee attendance audit history.",
           loadError,
@@ -3704,7 +3706,13 @@ function EmployeeProfile({ currentUser, catalogs }) {
             id: String(employeeId),
             name: historicalIdentity.employeeName || "Former employee",
             role: historicalIdentity.role || "Not recorded",
-            godown: historicalIdentity.godown || "Not recorded",
+            ...(historicalIdentity.departmentId
+              ? {
+                  departmentId: historicalIdentity.departmentId,
+                  department:
+                    historicalIdentity.departmentName || "Not recorded",
+                }
+              : { godown: historicalIdentity.godown || "Not recorded" }),
             status: "Deleted employee record",
             createdAt: null,
             historicalSnapshot: true,
@@ -3848,10 +3856,12 @@ function EmployeeProfile({ currentUser, catalogs }) {
                 <dd>{displayRole || "Not available"}</dd>
               </div>
               <div>
-                <dt>Assigned godown</dt>
-                <dd>{displayGodown || "Not available"}</dd>
-                <dt>Department</dt>
-                <dd>{displayDepartment || "Not assigned"}</dd>
+                <dt>Assignment</dt>
+                <dd>
+                  {employee.departmentId
+                    ? `Department: ${displayDepartment || "Not available"}`
+                    : `Godown: ${displayGodown || "Not available"}`}
+                </dd>
               </div>
               <div>
                 <dt>Employment status</dt>
@@ -4179,8 +4189,7 @@ function Employees({
               <tr>
                 <th>EMPLOYEE</th>
                 <th>JOB ROLE</th>
-                <th>DEPARTMENT</th>
-                {isAdmin && <th>GODOWN</th>}
+                <th>ASSIGNMENT</th>
                 <th>STATUS</th>
                 {isAdmin && <th></th>}
               </tr>
@@ -4189,7 +4198,7 @@ function Employees({
               {loading && (
                 <tr>
                   <td
-                    colSpan={isAdmin ? 6 : 4}
+                    colSpan={isAdmin ? 5 : 4}
                     className="empty-state"
                     role="status"
                   >
@@ -4199,7 +4208,7 @@ function Employees({
               )}
               {error && !loading && (
                 <tr>
-                  <td colSpan={isAdmin ? 6 : 4} className="empty-state">
+                  <td colSpan={isAdmin ? 5 : 4} className="empty-state">
                     <div className="employee-load-error" role="alert">
                       <span>{error}</span>
                       <button
@@ -4232,8 +4241,7 @@ function Employees({
                       </div>
                     </td>
                     <td>{e.displayRole || e.role}</td>
-                    <td>{e.displayDepartment || "—"}</td>
-                    {isAdmin && <td>{e.displayGodown || e.godown}</td>}
+                    <td>{e.displayAssignment}</td>
                     <td>
                       <span className="status-badge active-status">
                         {e.status}
@@ -4264,7 +4272,7 @@ function Employees({
                 ))}
               {!loading && !error && filtered.length === 0 && (
                 <tr>
-                  <td colSpan={isAdmin ? 5 : 3} className="empty-state">
+                  <td colSpan={isAdmin ? 5 : 4} className="empty-state">
                     No employees match your search.
                   </td>
                 </tr>
@@ -4432,7 +4440,7 @@ function Attendance({
               <tr>
                 <th>EMPLOYEE</th>
                 <th>ROLE</th>
-                {isAdmin && <th>GODOWN</th>}
+                {isAdmin && <th>ASSIGNMENT</th>}
                 <th>ATTENDANCE STATUS</th>
                 <th>LAST UPDATED</th>
               </tr>
@@ -4469,7 +4477,7 @@ function Attendance({
                       </div>
                     </td>
                     <td>{e.displayRole || e.role}</td>
-                    {isAdmin && <td>{e.displayGodown || e.godown}</td>}
+                    {isAdmin && <td>{e.displayAssignment}</td>}
                     <td>
                       <select
                         className={`attendance-select ${statusClass(e.attendance)}`}
@@ -4861,7 +4869,7 @@ function Reports({
               <tr>
                 <th>DATE</th>
                 <th>EMPLOYEE</th>
-                <th>GODOWN</th>
+                <th>ASSIGNMENT</th>
                 <th>STATUS</th>
               </tr>
             </thead>
@@ -4891,7 +4899,13 @@ function Reports({
                         </strong>
                       )}
                     </td>
-                    <td>{a.godown || employee?.godown || "Unknown godown"}</td>
+                    <td>
+                      {a.godown ||
+                        a.departmentName ||
+                        employee?.godown ||
+                        employee?.department ||
+                        "Unknown assignment"}
+                    </td>
                     <td>
                       <span className={`status-badge ${statusClass(a.status)}`}>
                         {a.status}
@@ -5191,7 +5205,6 @@ function SettingsPage({
   error,
   onRefresh,
   onSave,
-  onDeleteEntry,
 }) {
   const [newNames, setNewNames] = useState({});
   const [editedNames, setEditedNames] = useState({});
@@ -5285,25 +5298,6 @@ function SettingsPage({
     }
   };
 
-  const deleteEntry = async (category, entry) => {
-    if (
-      !window.confirm(
-        `Delete "${entry.name}" only if no existing records reference it? Archive it instead to preserve history.`,
-      )
-    ) {
-      return;
-    }
-    setSavingKey(`${category}:${entry.id}`);
-    setCatalogError("");
-    try {
-      await onDeleteEntry(category, entry);
-    } catch (deleteError) {
-      setCatalogError(deleteError.message || "Could not delete this entry.");
-    } finally {
-      setSavingKey("");
-    }
-  };
-
   return (
     <>
       <PageHeading
@@ -5384,7 +5378,10 @@ function SettingsPage({
               <div className="section-head">
                 <h2>{label}</h2>
                 <span className="count-pill">
-                  {catalogEntries(catalogs[key], { includeArchived: true }).length}
+                  {
+                    catalogEntries(catalogs[key], { includeArchived: true })
+                      .length
+                  }
                 </span>
               </div>
               <form
@@ -5467,14 +5464,6 @@ function SettingsPage({
                         >
                           {entry.active ? "Archive" : "Restore"}
                         </button>
-                        <button
-                          type="button"
-                          className="btn btn-secondary btn-small"
-                          disabled={Boolean(savingKey) || loading}
-                          onClick={() => void deleteEntry(key, entry)}
-                        >
-                          Delete
-                        </button>
                       </div>
                     );
                   },
@@ -5484,8 +5473,8 @@ function SettingsPage({
           ))}
           <p className="field-hint">
             Archive entries that are still referenced by employees, accounts,
-            attendance, or audit history. Deletion is available only when the
-            existing-record check finds no references.
+            attendance, or audit history. Archived entries are hidden from new
+            assignments but remain available to existing records.
           </p>
         </div>
       )}
@@ -5659,7 +5648,8 @@ function EmployeeImportModal({ onClose, onGetEmployees, onSave, catalogs }) {
             />
             <span className="field-hint">
               Use Name, or First Name and Second Name with an optional Third
-              Name, plus Role, Godown, and Status.
+              Name, plus Role, Godown, Department, and Status. Populate exactly
+              one of Godown or Department for each employee.
             </span>
           </label>
           {file && <div className="employee-import-filename">{file.name}</div>}
@@ -5729,7 +5719,7 @@ function EmployeeImportModal({ onClose, onGetEmployees, onSave, catalogs }) {
                           <th>ROW</th>
                           <th>NAME</th>
                           <th>ROLE</th>
-                          <th>GODOWN</th>
+                          <th>ASSIGNMENT</th>
                           <th>STATUS</th>
                           <th>CHECK</th>
                         </tr>
@@ -5740,7 +5730,7 @@ function EmployeeImportModal({ onClose, onGetEmployees, onSave, catalogs }) {
                             <td>{row.rowNumber}</td>
                             <td>{row.employee.name || "—"}</td>
                             <td>{row.employee.role}</td>
-                            <td>{row.employee.godown}</td>
+                            <td>{row.employee.assignment || "—"}</td>
                             <td>{row.employee.status}</td>
                             <td>
                               {row.errors.length > 0 ? (
@@ -5805,41 +5795,69 @@ function EmployeeImportModal({ onClose, onGetEmployees, onSave, catalogs }) {
   );
 }
 
-function EmployeeModal({
-  employee,
-  onClose,
-  onSave,
-  defaultGodown,
-  isAdmin,
-  catalogs,
-}) {
-  const activeGodowns = catalogEntries(catalogs.godowns);
+function EmployeeModal({ employee, onClose, onSave, defaultGodown, catalogs }) {
   const activeJobRoles = catalogEntries(catalogs.jobRoles);
-  const activeDepartments = catalogEntries(catalogs.departments);
-  const currentDepartment =
-    employee?.department ||
-    catalogEntries(catalogs.departments, { includeArchived: true }).find(
-      (entry) => entry.id === employee?.departmentId,
-    )?.name ||
-    "";
+  const defaultJobRole =
+    activeJobRoles.find((entry) => entry.id === "loader") || activeJobRoles[0];
+  const initialAssignmentType =
+    employee?.departmentId && !employee?.godown ? "department" : "godown";
+  const assignmentCatalog =
+    initialAssignmentType === "department"
+      ? catalogs.departments
+      : catalogs.godowns;
+  const existingAssignmentName =
+    initialAssignmentType === "department"
+      ? employee?.department
+      : employee?.godown;
+  const initialAssignment =
+    catalogEntries(assignmentCatalog, { includeArchived: true }).find(
+      (entry) =>
+        entry.id ===
+        (initialAssignmentType === "department"
+          ? employee?.departmentId
+          : employee?.godownId),
+    ) ||
+    findCatalogEntryByName(assignmentCatalog, existingAssignmentName) ||
+    (initialAssignmentType === "godown"
+      ? findCatalogEntryByName(catalogs.godowns, defaultGodown)
+      : null);
   const [form, setForm] = useState(
-    employee || {
-      name: "",
-      role: catalogs.jobRoles.loader?.name || activeJobRoles[0]?.name || "",
-      godown: defaultGodown,
-      status: "Active",
-    },
+    employee
+      ? {
+          name: employee.name || "",
+          role: employee.role || "",
+          jobRoleId: employee.jobRoleId || "",
+          status: employee.status || "Active",
+        }
+      : {
+          name: "",
+          role: defaultJobRole?.name || "",
+          jobRoleId: defaultJobRole?.id || "",
+          status: "Active",
+        },
   );
-  const [department, setDepartment] = useState(currentDepartment);
+  const [assignmentType, setAssignmentType] = useState(initialAssignmentType);
+  const [assignmentId, setAssignmentId] = useState(initialAssignment?.id || "");
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
   const update = (key, value) => setForm((prev) => ({ ...prev, [key]: value }));
+  const activeAssignments = catalogEntries(
+    catalogs[assignmentType === "department" ? "departments" : "godowns"],
+  );
+  const selectedArchivedAssignment = catalogEntries(
+    catalogs[assignmentType === "department" ? "departments" : "godowns"],
+    { includeArchived: true },
+  ).find((entry) => entry.id === assignmentId && !entry.active);
+  const assignmentOptions = [
+    ...activeAssignments,
+    ...(selectedArchivedAssignment ? [selectedArchivedAssignment] : []),
+  ];
   const submit = async (e) => {
     e.preventDefault();
     setSaving(true);
     setError("");
     try {
-      await onSave({ ...form, department });
+      await onSave({ ...form, assignmentType, assignmentId });
     } catch (saveError) {
       setError(saveError.message || "Could not save this employee.");
     } finally {
@@ -5878,11 +5896,21 @@ function EmployeeModal({
             <select
               required
               value={form.role}
-              onChange={(e) => update("role", e.target.value)}
+              onChange={(event) => {
+                const selectedRole = activeJobRoles.find(
+                  (entry) => entry.name === event.target.value,
+                );
+                setForm((previous) => ({
+                  ...previous,
+                  role: event.target.value,
+                  jobRoleId: selectedRole?.id || "",
+                }));
+              }}
             >
               {[
                 ...activeJobRoles.map((entry) => entry.name),
-                ...(form.role && !activeJobRoles.some((entry) => entry.name === form.role)
+                ...(form.role &&
+                !activeJobRoles.some((entry) => entry.name === form.role)
                   ? [form.role]
                   : []),
               ].map((r) => (
@@ -5891,32 +5919,42 @@ function EmployeeModal({
             </select>
           </label>
           <label>
-            Godown
-            {isAdmin ? (
-              <select
-                required
-                value={form.godown}
-                onChange={(e) => update("godown", e.target.value)}
-              >
-                {[
-                  ...activeGodowns.map((entry) => entry.name),
-                  ...(form.godown && !activeGodowns.some((entry) => entry.name === form.godown)
-                    ? [form.godown]
-                    : []),
-                ].map((g) => (
-                  <option key={g}>{g}</option>
-                ))}
-              </select>
-            ) : (
-              <div className="fixed-godown">
-                <Warehouse size={15} /> {form.godown}
-              </div>
-            )}
-            {!isAdmin && (
-              <span className="field-hint">
-                Your account can only manage records in this godown.
-              </span>
-            )}
+            Assignment type
+            <select
+              value={assignmentType}
+              onChange={(event) => {
+                const nextType = event.target.value;
+                const nextEntries = catalogEntries(
+                  catalogs[
+                    nextType === "department" ? "departments" : "godowns"
+                  ],
+                );
+                setAssignmentType(nextType);
+                setAssignmentId(nextEntries[0]?.id || "");
+              }}
+            >
+              <option value="godown">Godown</option>
+              <option value="department">Department</option>
+            </select>
+          </label>
+          <label>
+            {assignmentType === "department" ? "Department" : "Godown"}
+            <select
+              required
+              value={assignmentId}
+              onChange={(event) => setAssignmentId(event.target.value)}
+            >
+              <option value="">Select an active {assignmentType}</option>
+              {assignmentOptions.map((entry) => (
+                <option key={entry.id} value={entry.id}>
+                  {entry.name}
+                  {entry.active ? "" : " (archived; retained)"}
+                </option>
+              ))}
+            </select>
+            <span className="field-hint">
+              Assign an employee to exactly one godown or department.
+            </span>
           </label>
           <label>
             Employment status
