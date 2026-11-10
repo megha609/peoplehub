@@ -91,9 +91,10 @@ import { auth, db, staffAccountAuth } from "./firebase";
 
 const fmt = (n) => String(n).padStart(2, "0");
 const today = getLocalDateString();
-const SUPER_ADMIN_UIDS = ["ZYa131iL8AYn5fAZauhDH5R3ody2", "a1Y9aWQ4WVYVx00tEEMJ6bdSfuu2", "Z24ZJMNkcQTJZSg6hVwiz1VQkUp1"];
+const SUPER_ADMIN_UIDS = ["ZYa131iL8AYn5fAZauhDH5R3ody2", "a1Y9aWQ4WVYVx00tEEMJ6bdSfuu2"];
 const statuses = ["Present", "Absent", "Sick", "On Leave", "Overtime"];
 const attendancePageSize = 50;
+const analyticsPageSize = 500;
 const employeeAuditPageSize = 20;
 const titleMap = {
   "/": "Overview",
@@ -102,6 +103,7 @@ const titleMap = {
   "/attendance": "Daily attendance",
   "/calendar": "Attendance calendar",
   "/reports": "Reports",
+  "/analytics": "PeopleHub Analytics",
   "/users": "User management",
   "/users/new": "Create staff account",
   "/settings": "Settings",
@@ -196,6 +198,23 @@ function getGodownNames(catalogs, godown) {
     : [godown];
 }
 
+function createAnalyticsAttendanceQuery(from, to, godownNames, cursor = null) {
+  const constraints = [
+    where("date", ">=", from),
+    where("date", "<=", to),
+    orderBy("date", "asc"),
+    orderBy("__name__", "asc"),
+    limit(analyticsPageSize),
+  ];
+  if (godownNames.length === 1) {
+    constraints.unshift(where("godown", "==", godownNames[0]));
+  } else if (godownNames.length > 1) {
+    constraints.unshift(where("godown", "in", godownNames));
+  }
+  if (cursor) constraints.push(startAfter(cursor));
+  return query(collection(db, "attendance"), ...constraints);
+}
+
 function createEmployeeAuditQuery(
   employeeId,
   role,
@@ -260,6 +279,19 @@ function App() {
   const [reportHasMore, setReportHasMore] = useState(false);
   const [reportFrom, setReportFrom] = useState(today);
   const [reportTo, setReportTo] = useState(today);
+  const [analyticsFrom, setAnalyticsFrom] = useState(() =>
+    formatLocalDate(firstDayOfMonth(new Date(`${today}T00:00:00`))),
+  );
+  const [analyticsTo, setAnalyticsTo] = useState(today);
+  const [analyticsGodown, setAnalyticsGodown] = useState("All godowns");
+  const [analyticsDepartmentId, setAnalyticsDepartmentId] =
+    useState("All departments");
+  const [analyticsAttendance, setAnalyticsAttendance] = useState([]);
+  const [analyticsAttendanceLoading, setAnalyticsAttendanceLoading] =
+    useState(false);
+  const [analyticsAttendanceError, setAnalyticsAttendanceError] = useState("");
+  const [analyticsDataQueryKey, setAnalyticsDataQueryKey] = useState("");
+  const [analyticsErrorQueryKey, setAnalyticsErrorQueryKey] = useState("");
   const [calendarMonth, setCalendarMonth] = useState(
     firstDayOfMonth(new Date(`${today}T00:00:00`)),
   );
@@ -283,6 +315,7 @@ function App() {
   const attendanceRequestId = useRef(0);
   const reportAttendanceRequestId = useRef(0);
   const reportAttendanceCursor = useRef(null);
+  const analyticsAttendanceRequestId = useRef(0);
   const dailyAttendanceRequestId = useRef(0);
   const isSuperAdmin =
     SUPER_ADMIN_UIDS.includes(currentUser?.id) &&
@@ -313,6 +346,10 @@ function App() {
   const reportQueryKey = attendanceScopeKey
     ? `${attendanceScopeKey}|${reportFrom}|${reportTo}`
     : "";
+  const analyticsQueryKey =
+    currentUser && isAdmin
+      ? `${currentUser.id}|${currentUser.role}|${analyticsFrom}|${analyticsTo}|${analyticsGodown}`
+      : "";
   const visibleCalendarAttendance =
     attendanceScopeKey && calendarDataScopeKey === attendanceScopeKey
       ? attendance
@@ -329,6 +366,8 @@ function App() {
     calendarErrorQueryKey === calendarQueryKey ? attendanceError : "";
   const visibleReportError =
     reportErrorQueryKey === reportQueryKey ? reportAttendanceError : "";
+  const visibleAnalyticsError =
+    analyticsErrorQueryKey === analyticsQueryKey ? analyticsAttendanceError : "";
   const visibleReportDataQueryKey =
     reportDataScopeKey === attendanceScopeKey ? reportDataQueryKey : "";
   const [loadedReportFrom, loadedReportTo] = visibleReportDataQueryKey
@@ -740,6 +779,98 @@ function App() {
       orgCatalogs,
     ],
   );
+
+  const loadAnalyticsAttendance = useCallback(async () => {
+    const requestId = ++analyticsAttendanceRequestId.current;
+    if (!currentUser || !isAdmin) {
+      setAnalyticsAttendance([]);
+      setAnalyticsDataQueryKey("");
+      setAnalyticsAttendanceError("");
+      setAnalyticsErrorQueryKey("");
+      setAnalyticsAttendanceLoading(false);
+      return true;
+    }
+    if (location.pathname !== "/analytics") {
+      setAnalyticsAttendanceLoading(false);
+      return true;
+    }
+    if (
+      !isAttendanceDate(analyticsFrom) ||
+      !isAttendanceDate(analyticsTo) ||
+      analyticsFrom > analyticsTo
+    ) {
+      setAnalyticsAttendance([]);
+      setAnalyticsDataQueryKey("");
+      setAnalyticsAttendanceError("Choose a valid analytics date range.");
+      setAnalyticsErrorQueryKey(analyticsQueryKey);
+      setAnalyticsAttendanceLoading(false);
+      return false;
+    }
+
+    setAnalyticsAttendanceLoading(true);
+    try {
+      const godownNames =
+        analyticsGodown === "All godowns"
+          ? []
+          : getGodownNames(orgCatalogs, analyticsGodown);
+      const records = [];
+      let cursor = null;
+      while (true) {
+        const snapshot = await getDocs(
+          createAnalyticsAttendanceQuery(
+            analyticsFrom,
+            analyticsTo,
+            godownNames,
+            cursor,
+          ),
+        );
+        if (requestId !== analyticsAttendanceRequestId.current) return false;
+        records.push(
+          ...snapshot.docs.map((attendanceDoc) => ({
+            id: attendanceDoc.id,
+            ...attendanceDoc.data(),
+          })),
+        );
+        if (snapshot.docs.length < analyticsPageSize) break;
+        cursor = snapshot.docs[snapshot.docs.length - 1];
+      }
+      setAnalyticsAttendance(records);
+      setAnalyticsDataQueryKey(analyticsQueryKey);
+      setAnalyticsAttendanceError("");
+      setAnalyticsErrorQueryKey("");
+      return true;
+    } catch (error) {
+      if (requestId === analyticsAttendanceRequestId.current) {
+        setAnalyticsAttendanceError(attendanceLoadErrorMessage(error));
+        setAnalyticsErrorQueryKey(analyticsQueryKey);
+      }
+      console.error(
+        "Could not load analytics attendance from Firestore.",
+        error,
+      );
+      return false;
+    } finally {
+      if (requestId === analyticsAttendanceRequestId.current) {
+        setAnalyticsAttendanceLoading(false);
+      }
+    }
+  }, [
+    currentUser,
+    isAdmin,
+    location.pathname,
+    analyticsFrom,
+    analyticsTo,
+    analyticsGodown,
+    analyticsQueryKey,
+    orgCatalogs,
+  ]);
+
+  useEffect(() => {
+    void loadAnalyticsAttendance();
+    return () => {
+      ++analyticsAttendanceRequestId.current;
+    };
+  }, [loadAnalyticsAttendance]);
 
   const downloadAttendanceReport = async () => {
     if (!currentUser || !isAdmin || reportExportLoading) return;
@@ -2270,6 +2401,13 @@ function App() {
               label="Reports"
             />
           )}
+          {isAdmin && (
+            <NavItem
+              to="/analytics"
+              icon={<ChartNoAxesCombined size={18} />}
+              label="Analytics"
+            />
+          )}
         </nav>
         {isAdmin && departmentEntries.length > 0 && (
           <div className="godown-nav department-nav">
@@ -2543,6 +2681,36 @@ function App() {
                     onLoadMore={() => loadReportAttendance(true)}
                     onDownload={downloadAttendanceReport}
                     exporting={reportExportLoading}
+                  />
+                ) : (
+                  <Navigate to="/" replace />
+                )
+              }
+            />
+            <Route
+              path="/analytics"
+              element={
+                isAdmin ? (
+                  <Analytics
+                    employees={employees}
+                    employeesLoading={employeesLoading}
+                    catalogs={orgCatalogs}
+                    attendance={analyticsAttendance}
+                    from={analyticsFrom}
+                    to={analyticsTo}
+                    setFrom={setAnalyticsFrom}
+                    setTo={setAnalyticsTo}
+                    godown={analyticsGodown}
+                    setGodown={setAnalyticsGodown}
+                    departmentId={analyticsDepartmentId}
+                    setDepartmentId={setAnalyticsDepartmentId}
+                    loading={
+                      analyticsAttendanceLoading ||
+                      (analyticsDataQueryKey !== analyticsQueryKey &&
+                        !visibleAnalyticsError)
+                    }
+                    error={visibleAnalyticsError}
+                    onRetry={loadAnalyticsAttendance}
                   />
                 ) : (
                   <Navigate to="/" replace />
@@ -5627,6 +5795,946 @@ function DeleteEmployeeModal({ employee, onClose, onConfirm }) {
           </button>
         </div>
       </section>
+    </div>
+  );
+}
+
+function Analytics({
+  employees,
+  employeesLoading,
+  catalogs,
+  attendance,
+  from,
+  to,
+  setFrom,
+  setTo,
+  godown,
+  setGodown,
+  departmentId,
+  setDepartmentId,
+  loading,
+  error,
+  onRetry,
+}) {
+  const [period, setPeriod] = useState("month");
+  const [customFrom, setCustomFrom] = useState(from);
+  const [customTo, setCustomTo] = useState(to);
+  const [customError, setCustomError] = useState("");
+
+  const godownEntries = catalogEntries(catalogs.godowns);
+  const departmentEntries = catalogEntries(catalogs.departments);
+  const godownNameById = useMemo(
+    () =>
+      new Map(
+        catalogEntries(catalogs.godowns, { includeArchived: true }).map(
+          (entry) => [entry.id, entry.name],
+        ),
+      ),
+    [catalogs.godowns],
+  );
+  const departmentNameById = useMemo(
+    () =>
+      new Map(
+        catalogEntries(catalogs.departments, { includeArchived: true }).map(
+          (entry) => [entry.id, entry.name],
+        ),
+      ),
+    [catalogs.departments],
+  );
+
+  const applyPeriod = (key) => {
+    setPeriod(key);
+    setCustomError("");
+    const base = new Date(`${today}T00:00:00`);
+    if (key === "today") {
+      setFrom(today);
+      setTo(today);
+    } else if (key === "week") {
+      const start = new Date(base);
+      start.setDate(start.getDate() - ((start.getDay() + 6) % 7));
+      setFrom(formatLocalDate(start));
+      setTo(today);
+    } else if (key === "month") {
+      setFrom(formatLocalDate(firstDayOfMonth(base)));
+      setTo(today);
+    } else if (key === "lastMonth") {
+      const start = new Date(base.getFullYear(), base.getMonth() - 1, 1);
+      const end = new Date(base.getFullYear(), base.getMonth(), 0);
+      setFrom(formatLocalDate(start));
+      setTo(formatLocalDate(end));
+    }
+  };
+
+  const applyCustomRange = () => {
+    if (!isAttendanceDate(customFrom) || !isAttendanceDate(customTo)) {
+      setCustomError("Choose two valid dates for the custom range.");
+      return;
+    }
+    if (customFrom > customTo) {
+      setCustomError("The start date must be on or before the end date.");
+      return;
+    }
+    setCustomError("");
+    setFrom(customFrom);
+    setTo(customTo);
+  };
+
+  const resetFilters = () => {
+    setGodown("All godowns");
+    setDepartmentId("All departments");
+    applyPeriod("month");
+  };
+
+  const filteredEmployees = useMemo(
+    () =>
+      employees.filter((employee) => {
+        if (departmentId !== "All departments") {
+          return employee.departmentId === departmentId;
+        }
+        if (godown === "All godowns") return true;
+        const entry = findCatalogEntryByName(catalogs.godowns, godown);
+        const acceptedNames = entry
+          ? [entry.name, ...(entry.legacyAliases || [])]
+          : [godown];
+        return (
+          employee.godownId === entry?.id ||
+          acceptedNames.includes(employee.godown)
+        );
+      }),
+    [employees, godown, departmentId, catalogs.godowns],
+  );
+
+  const workforce = useMemo(() => {
+    const active = filteredEmployees.filter(
+      (employee) => employee.status === "Active",
+    );
+    const byGodown = new Map();
+    const byDepartment = new Map();
+    for (const employee of filteredEmployees) {
+      if (employee.departmentId || employee.department) {
+        const key = employee.departmentId || `name:${employee.department}`;
+        const label =
+          departmentNameById.get(employee.departmentId) ||
+          employee.department ||
+          "Unknown department";
+        const bucket = byDepartment.get(key) || { label, count: 0 };
+        bucket.count += 1;
+        byDepartment.set(key, bucket);
+      } else {
+        const key = employee.godownId || `name:${employee.godown || ""}`;
+        const label =
+          godownNameById.get(employee.godownId) ||
+          employee.godown ||
+          "Unknown godown";
+        const bucket = byGodown.get(key) || { label, count: 0 };
+        bucket.count += 1;
+        byGodown.set(key, bucket);
+      }
+    }
+    const sortBuckets = (map) =>
+      [...map.values()].sort(
+        (left, right) =>
+          right.count - left.count || left.label.localeCompare(right.label),
+      );
+    return {
+      total: filteredEmployees.length,
+      active: active.length,
+      inactive: filteredEmployees.length - active.length,
+      byGodown: sortBuckets(byGodown),
+      byDepartment: sortBuckets(byDepartment),
+    };
+  }, [filteredEmployees, godownNameById, departmentNameById]);
+
+  const records = useMemo(
+    () =>
+      attendance.filter(
+        (record) =>
+          statuses.includes(record.status) &&
+          isAttendanceDate(record.date) &&
+          record.date >= from &&
+          record.date <= to &&
+          (departmentId === "All departments" ||
+            record.departmentId === departmentId),
+      ),
+    [attendance, from, to, departmentId],
+  );
+
+  const attendanceSummary = useMemo(() => {
+    const counts = Object.fromEntries(statuses.map((status) => [status, 0]));
+    for (const record of records) counts[record.status] += 1;
+    const marked = records.length;
+    return {
+      counts,
+      marked,
+      presentShare: marked
+        ? Math.round((counts.Present / marked) * 1000) / 10
+        : null,
+    };
+  }, [records]);
+
+  const monthlyPerformance = useMemo(() => {
+    const buckets = new Map();
+    for (const record of records) {
+      const key = record.date.slice(0, 7);
+      const bucket =
+        buckets.get(key) ||
+        Object.fromEntries(statuses.map((status) => [status, 0]));
+      bucket[record.status] += 1;
+      buckets.set(key, bucket);
+    }
+    return [...buckets.entries()]
+      .sort(([left], [right]) => left.localeCompare(right))
+      .map(([month, counts]) => {
+        const marked = statuses.reduce((sum, status) => sum + counts[status], 0);
+        return {
+          key: month,
+          label: new Date(`${month}-01T00:00:00`).toLocaleDateString("en-GB", {
+            month: "short",
+            year: "numeric",
+          }),
+          counts,
+          marked,
+          presentShare: marked
+            ? Math.round((counts.Present / marked) * 1000) / 10
+            : 0,
+        };
+      });
+  }, [records]);
+
+  const dailyTrends = useMemo(() => {
+    const buckets = new Map();
+    for (const record of records) {
+      const bucket =
+        buckets.get(record.date) ||
+        Object.fromEntries(statuses.map((status) => [status, 0]));
+      bucket[record.status] += 1;
+      buckets.set(record.date, bucket);
+    }
+    return [...buckets.entries()]
+      .sort(([left], [right]) => left.localeCompare(right))
+      .map(([date, counts]) => ({ date, counts }));
+  }, [records]);
+
+  const godownPerformance = useMemo(() => {
+    const buckets = new Map();
+    for (const record of records) {
+      if (record.departmentId || record.departmentName) continue;
+      const key = record.godownId || `name:${record.godown || ""}`;
+      const label =
+        godownNameById.get(record.godownId) || record.godown || "Unknown godown";
+      const bucket =
+        buckets.get(key) ||
+        {
+          label,
+          counts: Object.fromEntries(statuses.map((status) => [status, 0])),
+        };
+      bucket.counts[record.status] += 1;
+      buckets.set(key, bucket);
+    }
+    return [...buckets.values()]
+      .map((bucket) => {
+        const marked = statuses.reduce(
+          (sum, status) => sum + bucket.counts[status],
+          0,
+        );
+        return {
+          ...bucket,
+          marked,
+          presentShare: marked
+            ? Math.round((bucket.counts.Present / marked) * 1000) / 10
+            : 0,
+        };
+      })
+      .sort(
+        (left, right) =>
+          right.marked - left.marked || left.label.localeCompare(right.label),
+      );
+  }, [records, godownNameById]);
+
+  const departmentPerformance = useMemo(() => {
+    const buckets = new Map();
+    for (const record of records) {
+      if (!record.departmentId && !record.departmentName) continue;
+      const key = record.departmentId || `name:${record.departmentName || ""}`;
+      const label =
+        departmentNameById.get(record.departmentId) ||
+        record.departmentName ||
+        "Unknown department";
+      const bucket =
+        buckets.get(key) ||
+        {
+          label,
+          counts: Object.fromEntries(statuses.map((status) => [status, 0])),
+        };
+      bucket.counts[record.status] += 1;
+      buckets.set(key, bucket);
+    }
+    return [...buckets.values()]
+      .map((bucket) => {
+        const marked = statuses.reduce(
+          (sum, status) => sum + bucket.counts[status],
+          0,
+        );
+        return {
+          ...bucket,
+          marked,
+          presentShare: marked
+            ? Math.round((bucket.counts.Present / marked) * 1000) / 10
+            : 0,
+        };
+      })
+      .sort(
+        (left, right) =>
+          right.marked - left.marked || left.label.localeCompare(right.label),
+      );
+  }, [records, departmentNameById]);
+
+  const periodOptions = [
+    ["today", "Today"],
+    ["week", "This week"],
+    ["month", "This month"],
+    ["lastMonth", "Last month"],
+    ["custom", "Custom range"],
+  ];
+  const filtersModified =
+    period !== "month" ||
+    godown !== "All godowns" ||
+    departmentId !== "All departments";
+  const showAttendanceLoading = loading && records.length === 0;
+
+  return (
+    <>
+      <PageHeading
+        eyebrow="WORKFORCE INSIGHTS"
+        title="PeopleHub Analytics"
+        subtitle="A clear overview of workforce composition and attendance performance across the organisation."
+        action={
+          <button
+            type="button"
+            className="btn btn-secondary"
+            onClick={resetFilters}
+            disabled={!filtersModified}
+          >
+            <SlidersHorizontal size={15} /> Reset filters
+          </button>
+        }
+      />
+      <div className="panel analytics-filters">
+        <div className="analytics-filter-group">
+          <span className="analytics-filter-label">Date period</span>
+          <div className="analytics-period-options">
+            {periodOptions.map(([key, label]) => (
+              <button
+                key={key}
+                type="button"
+                className={`analytics-period-option ${period === key ? "active" : ""}`}
+                onClick={() => applyPeriod(key)}
+              >
+                {label}
+              </button>
+            ))}
+          </div>
+          {period === "custom" && (
+            <div className="analytics-custom-range">
+              <label>
+                From
+                <input
+                  type="date"
+                  value={customFrom}
+                  onChange={(event) => setCustomFrom(event.target.value)}
+                />
+              </label>
+              <label>
+                To
+                <input
+                  type="date"
+                  value={customTo}
+                  onChange={(event) => setCustomTo(event.target.value)}
+                />
+              </label>
+              <button
+                type="button"
+                className="btn btn-primary btn-small"
+                onClick={applyCustomRange}
+              >
+                Apply range
+              </button>
+            </div>
+          )}
+          {customError && period === "custom" && (
+            <div className="auth-feedback error" role="alert">
+              {customError}
+            </div>
+          )}
+        </div>
+        <div className="analytics-filter-group">
+          <span className="analytics-filter-label">Godown</span>
+          <select
+            className="analytics-select"
+            value={godown}
+            onChange={(event) => setGodown(event.target.value)}
+          >
+            <option>All godowns</option>
+            {godownEntries.map((entry) => (
+              <option key={entry.id} value={entry.name}>
+                {entry.name}
+              </option>
+            ))}
+          </select>
+        </div>
+        <div className="analytics-filter-group">
+          <span className="analytics-filter-label">Department</span>
+          <select
+            className="analytics-select"
+            value={departmentId}
+            onChange={(event) => setDepartmentId(event.target.value)}
+          >
+            <option>All departments</option>
+            {departmentEntries.map((entry) => (
+              <option key={entry.id} value={entry.id}>
+                {entry.name}
+              </option>
+            ))}
+          </select>
+        </div>
+      </div>
+      {error && (
+        <div
+          className="employee-load-error employee-load-error-banner"
+          role="alert"
+        >
+          <span>{error}</span>
+          <button
+            type="button"
+            className="btn btn-secondary btn-small"
+            onClick={onRetry}
+          >
+            Retry
+          </button>
+        </div>
+      )}
+
+      <div className="section-title-row">
+        <div>
+          <h2>Workforce overview</h2>
+          <p>Current employee register composition for the selected scope</p>
+        </div>
+      </div>
+      <div className="stats-grid analytics-kpis">
+        <StatCard
+          label="Total employees"
+          value={employeesLoading ? "…" : workforce.total}
+          note="In selected scope"
+          icon={<Users size={19} />}
+          tone="blue"
+        />
+        <StatCard
+          label="Active employees"
+          value={employeesLoading ? "…" : workforce.active}
+          note="Ready for attendance"
+          icon={<CircleCheck size={19} />}
+          tone="green"
+        />
+        <StatCard
+          label="Active godowns"
+          value={godownEntries.length}
+          note="Configured in Settings"
+          icon={<Warehouse size={19} />}
+          tone="orange"
+        />
+        <StatCard
+          label="Active departments"
+          value={departmentEntries.length}
+          note="Configured in Settings"
+          icon={<Building2 size={19} />}
+          tone="purple"
+        />
+      </div>
+      <div className="analytics-grid analytics-grid-workforce">
+        <section className="panel analytics-panel">
+          <div className="panel-heading">
+            <div>
+              <h2>Workforce status</h2>
+              <p>Active versus inactive employees</p>
+            </div>
+          </div>
+          <AnalyticsDonut
+            segments={[
+              {
+                label: "Active",
+                count: workforce.active,
+                color: "#36a879",
+              },
+              {
+                label: "Inactive",
+                count: workforce.inactive,
+                color: "#df796d",
+              },
+            ]}
+            empty={employeesLoading || workforce.total === 0}
+            emptyMessage="No employees in the selected scope."
+          />
+        </section>
+        <section className="panel analytics-panel">
+          <div className="panel-heading">
+            <div>
+              <h2>Employees by godown</h2>
+              <p>Current assignments, highest first</p>
+            </div>
+          </div>
+          <AnalyticsBarList
+            rows={workforce.byGodown}
+            color="#16856d"
+            emptyMessage="No godown assignments in the selected scope."
+          />
+        </section>
+        <section className="panel analytics-panel">
+          <div className="panel-heading">
+            <div>
+              <h2>Employees by department</h2>
+              <p>Current assignments, highest first</p>
+            </div>
+          </div>
+          <AnalyticsBarList
+            rows={workforce.byDepartment}
+            color="#527a9c"
+            emptyMessage="No department assignments in the selected scope."
+          />
+        </section>
+      </div>
+
+      <div className="section-title-row">
+        <div>
+          <h2>Attendance overview</h2>
+          <p>
+            Marked records from {from} to {to}
+          </p>
+        </div>
+      </div>
+      <div className="analytics-grid analytics-grid-attendance">
+        <section className="panel analytics-panel">
+          <div className="panel-heading">
+            <div>
+              <h2>Attendance distribution</h2>
+              <p>Share of all marked records in the selected period</p>
+            </div>
+            <span className="status-badge">
+              {loading ? "Updating" : `${attendanceSummary.marked} marked`}
+            </span>
+          </div>
+          {showAttendanceLoading ? (
+            <AnalyticsLoading message="Loading attendance records..." />
+          ) : (
+            <AnalyticsDonut
+              segments={statuses.map((status, index) => ({
+                label: status,
+                count: attendanceSummary.counts[status],
+                color: ANALYTICS_STATUS_COLORS[index],
+              }))}
+              empty={attendanceSummary.marked === 0}
+              emptyMessage="No attendance records in the selected period."
+            />
+          )}
+        </section>
+        <section className="panel analytics-panel">
+          <div className="panel-heading">
+            <div>
+              <h2>Monthly attendance performance</h2>
+              <p>Status counts with Present share of marked records</p>
+            </div>
+          </div>
+          {showAttendanceLoading ? (
+            <AnalyticsLoading message="Loading attendance records..." />
+          ) : (
+            <AnalyticsMonthlyChart
+              buckets={monthlyPerformance}
+              emptyMessage="No attendance records in the selected period."
+            />
+          )}
+          <p className="field-hint">
+            Present share = Present records ÷ all marked attendance records ×
+            100. All five statuses count towards marked records.
+          </p>
+        </section>
+      </div>
+
+      <div className="section-title-row">
+        <div>
+          <h2>Godown and department performance</h2>
+          <p>Based on the assignment recorded on each attendance entry</p>
+        </div>
+      </div>
+      <div className="analytics-grid analytics-grid-attendance">
+        <section className="panel analytics-panel">
+          <div className="panel-heading">
+            <div>
+              <h2>Attendance by godown</h2>
+              <p>Status counts and Present share per godown</p>
+            </div>
+          </div>
+          {showAttendanceLoading ? (
+            <AnalyticsLoading message="Loading attendance records..." />
+          ) : (
+            <AnalyticsComparisonList
+              rows={godownPerformance}
+              emptyMessage="No godown attendance in the selected period."
+            />
+          )}
+        </section>
+        <section className="panel analytics-panel">
+          <div className="panel-heading">
+            <div>
+              <h2>Attendance by department</h2>
+              <p>Status counts and Present share per department</p>
+            </div>
+          </div>
+          {showAttendanceLoading ? (
+            <AnalyticsLoading message="Loading attendance records..." />
+          ) : (
+            <AnalyticsComparisonList
+              rows={departmentPerformance}
+              emptyMessage="No department attendance in the selected period."
+            />
+          )}
+        </section>
+      </div>
+
+      <div className="section-title-row">
+        <div>
+          <h2>Daily attendance trends</h2>
+          <p>Marked records per day in chronological order</p>
+        </div>
+      </div>
+      <section className="panel analytics-panel">
+        {showAttendanceLoading ? (
+          <AnalyticsLoading message="Loading attendance records..." />
+        ) : (
+          <AnalyticsDailyChart
+            days={dailyTrends}
+            emptyMessage="No attendance records in the selected period."
+          />
+        )}
+      </section>
+    </>
+  );
+}
+
+const ANALYTICS_STATUS_COLORS = ["#36a879", "#df796d", "#d49a3d", "#9177c7", "#527a9c"];
+
+function AnalyticsLoading({ message }) {
+  return (
+    <div className="data-refresh-indicator" role="status" aria-live="polite">
+      {message}
+    </div>
+  );
+}
+
+function AnalyticsLegend({ items }) {
+  return (
+    <div className="analytics-legend">
+      {items.map(({ label, color }) => (
+        <span key={label}>
+          <span
+            className="mini-dot"
+            style={color ? { background: color } : undefined}
+          />
+          {label}
+        </span>
+      ))}
+    </div>
+  );
+}
+
+function AnalyticsDonut({ segments, empty, emptyMessage }) {
+  const total = segments.reduce((sum, segment) => sum + segment.count, 0);
+  if (empty || total === 0) {
+    return <div className="empty-state analytics-empty">{emptyMessage}</div>;
+  }
+  const radius = 15.9155;
+  let offset = 25;
+  const circles = segments
+    .filter((segment) => segment.count > 0)
+    .map((segment) => {
+      const fraction = (segment.count / total) * 100;
+      const circle = (
+        <circle
+          key={segment.label}
+          r={radius}
+          cx="21"
+          cy="21"
+          fill="transparent"
+          stroke={segment.color}
+          strokeWidth="7"
+          strokeDasharray={`${fraction} ${100 - fraction}`}
+          strokeDashoffset={offset}
+        />
+      );
+      offset -= fraction;
+      return circle;
+    });
+  return (
+    <div className="analytics-donut-wrap">
+      <div className="analytics-donut">
+        <svg
+          viewBox="0 0 42 42"
+          role="img"
+          aria-label={segments
+            .map((segment) => `${segment.label}: ${segment.count}`)
+            .join(", ")}
+        >
+          <circle
+            r={radius}
+            cx="21"
+            cy="21"
+            fill="transparent"
+            stroke="#eef3f0"
+            strokeWidth="7"
+          />
+          {circles}
+        </svg>
+        <div className="analytics-donut-center">
+          <strong>{total}</strong>
+          <span>total</span>
+        </div>
+      </div>
+      <div className="analytics-donut-legend">
+        {segments.map((segment) => (
+          <div className="analytics-donut-legend-row" key={segment.label}>
+            <span
+              className="mini-dot"
+              style={{ background: segment.color }}
+            />
+            <span className="analytics-donut-legend-label">
+              {segment.label}
+            </span>
+            <strong>{segment.count}</strong>
+            <span className="analytics-donut-legend-share">
+              {total ? Math.round((segment.count / total) * 1000) / 10 : 0}%
+            </span>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function AnalyticsBarList({ rows, color, emptyMessage }) {
+  if (rows.length === 0) {
+    return <div className="empty-state analytics-empty">{emptyMessage}</div>;
+  }
+  const max = Math.max(...rows.map((row) => row.count), 1);
+  return (
+    <div className="analytics-bar-list">
+      {rows.map((row) => (
+        <div className="analytics-bar-row" key={row.label}>
+          <span className="analytics-bar-label" title={row.label}>
+            {row.label}
+          </span>
+          <div className="analytics-bar-track">
+            <div
+              className="analytics-bar-fill"
+              style={{
+                width: `${Math.max((row.count / max) * 100, 2)}%`,
+                background: color,
+              }}
+            />
+          </div>
+          <strong className="analytics-bar-value">{row.count}</strong>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function AnalyticsMonthlyChart({ buckets, emptyMessage }) {
+  if (buckets.length === 0) {
+    return <div className="empty-state analytics-empty">{emptyMessage}</div>;
+  }
+  const maxCount = Math.max(
+    ...buckets.flatMap((bucket) =>
+      statuses.map((status) => bucket.counts[status]),
+    ),
+    1,
+  );
+  const pointX = (index) =>
+    buckets.length === 1 ? 50 : (index / (buckets.length - 1)) * 100;
+  const pointY = (share) => 36 - (share / 100) * 32;
+  const points = buckets
+    .map((bucket, index) => `${pointX(index)},${pointY(bucket.presentShare)}`)
+    .join(" ");
+  return (
+    <div>
+      <div className="analytics-monthly">
+        {buckets.map((bucket) => (
+          <div className="analytics-month-column" key={bucket.key}>
+            <div className="analytics-month-bars">
+              {statuses.map((status, statusIndex) => (
+                <div
+                  key={status}
+                  className="analytics-month-bar"
+                  title={`${bucket.label} ${status}: ${bucket.counts[status]}`}
+                  style={{
+                    height: `${Math.max(
+                      (bucket.counts[status] / maxCount) * 100,
+                      bucket.counts[status] > 0 ? 3 : 0,
+                    )}%`,
+                    background: ANALYTICS_STATUS_COLORS[statusIndex],
+                  }}
+                />
+              ))}
+            </div>
+            <span className="analytics-month-label">{bucket.label}</span>
+          </div>
+        ))}
+      </div>
+      <svg
+        className="analytics-share-line"
+        viewBox="0 0 100 40"
+        preserveAspectRatio="none"
+        role="img"
+        aria-label={`Present share line: ${buckets
+          .map((bucket) => `${bucket.label} ${bucket.presentShare}%`)
+          .join(", ")}`}
+      >
+        <polyline
+          points={points}
+          fill="none"
+          stroke="#102b3b"
+          strokeWidth="1.6"
+          strokeLinejoin="round"
+          strokeLinecap="round"
+          vectorEffect="non-scaling-stroke"
+        />
+        {buckets.map((bucket, index) => (
+          <circle
+            key={bucket.key}
+            cx={pointX(index)}
+            cy={pointY(bucket.presentShare)}
+            r="1.8"
+            fill="#102b3b"
+          />
+        ))}
+      </svg>
+      <div className="analytics-share-labels">
+        {buckets.map((bucket) => (
+          <span key={bucket.key}>{bucket.presentShare}%</span>
+        ))}
+      </div>
+      <AnalyticsLegend
+        items={[
+          ...statuses.map((status, index) => ({
+            label: status,
+            color: ANALYTICS_STATUS_COLORS[index],
+          })),
+          { label: "Present share", color: "#102b3b" },
+        ]}
+      />
+    </div>
+  );
+}
+
+function AnalyticsComparisonList({ rows, emptyMessage }) {
+  if (rows.length === 0) {
+    return <div className="empty-state analytics-empty">{emptyMessage}</div>;
+  }
+  const maxMarked = Math.max(...rows.map((row) => row.marked), 1);
+  return (
+    <div className="analytics-comparison-list">
+      {rows.map((row) => (
+        <div className="analytics-comparison-row" key={row.label}>
+          <div className="analytics-comparison-head">
+            <span className="analytics-bar-label" title={row.label}>
+              {row.label}
+            </span>
+            <span className="analytics-comparison-meta">
+              {row.marked} marked · Present share {row.presentShare}%
+            </span>
+          </div>
+          <div
+            className="analytics-stacked-bar"
+            role="img"
+            aria-label={statuses
+              .map((status) => `${status}: ${row.counts[status]}`)
+              .join(", ")}
+          >
+            {statuses.map((status, statusIndex) =>
+              row.counts[status] > 0 ? (
+                <div
+                  key={status}
+                  title={`${row.label} ${status}: ${row.counts[status]}`}
+                  style={{
+                    width: `${(row.counts[status] / maxMarked) * 100}%`,
+                    background: ANALYTICS_STATUS_COLORS[statusIndex],
+                  }}
+                />
+              ) : null,
+            )}
+          </div>
+        </div>
+      ))}
+      <AnalyticsLegend
+        items={statuses.map((status, index) => ({
+          label: status,
+          color: ANALYTICS_STATUS_COLORS[index],
+        }))}
+      />
+    </div>
+  );
+}
+
+function AnalyticsDailyChart({ days, emptyMessage }) {
+  if (days.length === 0) {
+    return <div className="empty-state analytics-empty">{emptyMessage}</div>;
+  }
+  const maxTotal = Math.max(
+    ...days.map((day) =>
+      statuses.reduce((sum, status) => sum + day.counts[status], 0),
+    ),
+    1,
+  );
+  return (
+    <div>
+      <div className="analytics-daily">
+        {days.map((day) => {
+          const total = statuses.reduce(
+            (sum, status) => sum + day.counts[status],
+            0,
+          );
+          return (
+            <div className="analytics-day-column" key={day.date}>
+              <div
+                className="analytics-day-bar"
+                title={`${day.date}: ${total} marked`}
+              >
+                {statuses.map((status, statusIndex) =>
+                  day.counts[status] > 0 ? (
+                    <div
+                      key={status}
+                      style={{
+                        height: `${(day.counts[status] / maxTotal) * 100}%`,
+                        background: ANALYTICS_STATUS_COLORS[statusIndex],
+                      }}
+                    />
+                  ) : null,
+                )}
+              </div>
+              <span className="analytics-day-label">
+                {day.date.slice(8, 10)}
+              </span>
+            </div>
+          );
+        })}
+      </div>
+      <div className="analytics-daily-axis">
+        <span>{days[0].date}</span>
+        <span>{days[days.length - 1].date}</span>
+      </div>
+      <AnalyticsLegend
+        items={statuses.map((status, index) => ({
+          label: status,
+          color: ANALYTICS_STATUS_COLORS[index],
+        }))}
+      />
     </div>
   );
 }

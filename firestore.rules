@@ -3,7 +3,7 @@ rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
     function protectedSuperAdminUids() {
-      return ["ZYa131iL8AYn5fAZauhDH5R3ody2","a1Y9aWQ4WVYVx00tEEMJ6bdSfuu2","Z24ZJMNkcQTJZSg6hVwiz1VQkUp1"];
+      return ["ZYa131iL8AYn5fAZauhDH5R3ody2","a1Y9aWQ4WVYVx00tEEMJ6bdSfuu2"];
     }
 
     function signedIn() {
