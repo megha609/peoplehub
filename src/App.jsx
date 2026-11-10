@@ -125,14 +125,14 @@ function normalizeOrgCatalogs(value) {
             active: entry.active,
             ...(Array.isArray(entry.legacyAliases)
               ? {
-                  legacyAliases: [
-                    ...new Set(
-                      entry.legacyAliases.filter(
-                        (alias) => typeof alias === "string" && alias.trim(),
-                      ),
+                legacyAliases: [
+                  ...new Set(
+                    entry.legacyAliases.filter(
+                      (alias) => typeof alias === "string" && alias.trim(),
                     ),
-                  ],
-                }
+                  ),
+                ],
+              }
               : {}),
           },
         ]),
@@ -480,23 +480,23 @@ function App() {
         currentUser.role !== "Staff"
           ? [await getDocs(employeesCollection)]
           : await Promise.all([
-              getDocs(
-                query(
-                  employeesCollection,
-                  where("godown", "==", currentUser.godown),
-                ),
+            getDocs(
+              query(
+                employeesCollection,
+                where("godown", "==", currentUser.godown),
               ),
-              ...(currentUser.godownId
-                ? [
-                    getDocs(
-                      query(
-                        employeesCollection,
-                        where("godownId", "==", currentUser.godownId),
-                      ),
-                    ),
-                  ]
-                : []),
-            ]);
+            ),
+            ...(currentUser.godownId
+              ? [
+                getDocs(
+                  query(
+                    employeesCollection,
+                    where("godownId", "==", currentUser.godownId),
+                  ),
+                ),
+              ]
+              : []),
+          ]);
       if (requestId !== employeeRequestId.current) return false;
 
       const employeeDocs = new Map(
@@ -559,45 +559,45 @@ function App() {
       const attendanceQueries =
         isAdmin && scopedGodown !== "All godowns"
           ? [
-              query(
-                attendanceCollection,
-                ...constraints,
-                ...(getGodownNames(orgCatalogs, scopedGodown).length > 1
-                  ? [
-                      where(
-                        "godown",
-                        "in",
-                        getGodownNames(orgCatalogs, scopedGodown),
-                      ),
-                    ]
-                  : [
-                      where(
-                        "godown",
-                        "==",
-                        getGodownNames(orgCatalogs, scopedGodown)[0] ||
-                          scopedGodown,
-                      ),
-                    ]),
-              ),
-            ]
+            query(
+              attendanceCollection,
+              ...constraints,
+              ...(getGodownNames(orgCatalogs, scopedGodown).length > 1
+                ? [
+                  where(
+                    "godown",
+                    "in",
+                    getGodownNames(orgCatalogs, scopedGodown),
+                  ),
+                ]
+                : [
+                  where(
+                    "godown",
+                    "==",
+                    getGodownNames(orgCatalogs, scopedGodown)[0] ||
+                    scopedGodown,
+                  ),
+                ]),
+            ),
+          ]
           : isAdmin
             ? [query(attendanceCollection, ...constraints)]
             : [
-                query(
-                  attendanceCollection,
-                  ...constraints,
-                  where("godown", "==", currentUser.godown),
-                ),
-                ...(currentUser.godownId
-                  ? [
-                      query(
-                        attendanceCollection,
-                        ...constraints,
-                        where("godownId", "==", currentUser.godownId),
-                      ),
-                    ]
-                  : []),
-              ];
+              query(
+                attendanceCollection,
+                ...constraints,
+                where("godown", "==", currentUser.godown),
+              ),
+              ...(currentUser.godownId
+                ? [
+                  query(
+                    attendanceCollection,
+                    ...constraints,
+                    where("godownId", "==", currentUser.godownId),
+                  ),
+                ]
+                : []),
+            ];
       const snapshots = await Promise.all(
         attendanceQueries.map((attendanceQuery) => getDocs(attendanceQuery)),
       );
@@ -858,45 +858,45 @@ function App() {
       const attendanceQueries =
         isAdmin && scopedGodown !== "All godowns"
           ? [
-              query(
-                attendanceCollection,
-                ...constraints,
-                ...(getGodownNames(orgCatalogs, scopedGodown).length > 1
-                  ? [
-                      where(
-                        "godown",
-                        "in",
-                        getGodownNames(orgCatalogs, scopedGodown),
-                      ),
-                    ]
-                  : [
-                      where(
-                        "godown",
-                        "==",
-                        getGodownNames(orgCatalogs, scopedGodown)[0] ||
-                          scopedGodown,
-                      ),
-                    ]),
-              ),
-            ]
+            query(
+              attendanceCollection,
+              ...constraints,
+              ...(getGodownNames(orgCatalogs, scopedGodown).length > 1
+                ? [
+                  where(
+                    "godown",
+                    "in",
+                    getGodownNames(orgCatalogs, scopedGodown),
+                  ),
+                ]
+                : [
+                  where(
+                    "godown",
+                    "==",
+                    getGodownNames(orgCatalogs, scopedGodown)[0] ||
+                    scopedGodown,
+                  ),
+                ]),
+            ),
+          ]
           : isAdmin
             ? [query(attendanceCollection, ...constraints)]
             : [
-                query(
-                  attendanceCollection,
-                  ...constraints,
-                  where("godown", "==", currentUser.godown),
-                ),
-                ...(currentUser.godownId
-                  ? [
-                      query(
-                        attendanceCollection,
-                        ...constraints,
-                        where("godownId", "==", currentUser.godownId),
-                      ),
-                    ]
-                  : []),
-              ];
+              query(
+                attendanceCollection,
+                ...constraints,
+                where("godown", "==", currentUser.godown),
+              ),
+              ...(currentUser.godownId
+                ? [
+                  query(
+                    attendanceCollection,
+                    ...constraints,
+                    where("godownId", "==", currentUser.godownId),
+                  ),
+                ]
+                : []),
+            ];
       const snapshots = await Promise.all(
         attendanceQueries.map((attendanceQuery) => getDocs(attendanceQuery)),
       );
@@ -996,7 +996,7 @@ function App() {
                 "Staff account",
               role:
                 SUPER_ADMIN_UIDS.includes(accountDoc.id) &&
-                profile.role === "SuperAdmin"
+                  profile.role === "SuperAdmin"
                   ? "SuperAdmin"
                   : profile.role,
               godown: profile.godown,
@@ -1105,11 +1105,11 @@ function App() {
         setCurrentUser((previous) =>
           previous?.id === currentUser.id
             ? {
-                ...previous,
-                role,
-                godown: role === "Staff" ? profile.godown : null,
-                godownId: role === "Staff" ? profile.godownId || null : null,
-              }
+              ...previous,
+              role,
+              godown: role === "Staff" ? profile.godown : null,
+              godownId: role === "Staff" ? profile.godownId || null : null,
+            }
             : previous,
         );
         setActiveGodown(role === "Staff" ? profile.godown : "All godowns");
@@ -1404,8 +1404,8 @@ function App() {
     const godownEntry =
       role === "Staff"
         ? catalogEntries(orgCatalogs.godowns, { includeArchived: true }).find(
-            (entry) => entry.id === godownId,
-          )
+          (entry) => entry.id === godownId,
+        )
         : null;
     const changingGodown = godownId !== account.godownId;
     const changingAssignment =
@@ -1467,13 +1467,13 @@ function App() {
         ...changes,
         ...(Object.hasOwn(changes, "role") || Object.hasOwn(changes, "godownId")
           ? {
-              role,
-              godown,
-              godownId:
-                role === "Staff" && orgCatalogStored
-                  ? godownEntry.id
-                  : deleteField(),
-            }
+            role,
+            godown,
+            godownId:
+              role === "Staff" && orgCatalogStored
+                ? godownEntry.id
+                : deleteField(),
+          }
           : {}),
       };
       await updateDoc(doc(db, "users", accountId), profileChanges);
@@ -1481,13 +1481,13 @@ function App() {
         previous.map((account) =>
           account.id === accountId
             ? {
-                ...account,
-                ...profileChanges,
-                godownId:
-                  role === "Staff" && orgCatalogStored
-                    ? godownEntry?.id || null
-                    : null,
-              }
+              ...account,
+              ...profileChanges,
+              godownId:
+                role === "Staff" && orgCatalogStored
+                  ? godownEntry?.id || null
+                  : null,
+            }
             : account,
         ),
       );
@@ -1533,15 +1533,15 @@ function App() {
         : !department
           ? []
           : employees.filter((employee) => {
-              const acceptedNames = [
-                department.name,
-                ...(department.legacyAliases || []),
-              ];
-              return (
-                employee.departmentId === activeDepartmentId ||
-                acceptedNames.includes(employee.department)
-              );
-            });
+            const acceptedNames = [
+              department.name,
+              ...(department.legacyAliases || []),
+            ];
+            return (
+              employee.departmentId === activeDepartmentId ||
+              acceptedNames.includes(employee.department)
+            );
+          });
     return filteredEmployees.map((employee) => ({
       ...employee,
       displayRole:
@@ -1570,18 +1570,16 @@ function App() {
         employee.department ||
         "",
       displayAssignment: employee.departmentId
-        ? `Department: ${
-            catalogEntries(orgCatalogs.departments, {
-              includeArchived: true,
-            }).find((entry) => entry.id === employee.departmentId)?.name ||
-            employee.department
-          }`
-        : `Godown: ${
-            catalogEntries(orgCatalogs.godowns, {
-              includeArchived: true,
-            }).find((entry) => entry.id === employee.godownId)?.name ||
-            employee.godown
-          }`,
+        ? `Department: ${catalogEntries(orgCatalogs.departments, {
+          includeArchived: true,
+        }).find((entry) => entry.id === employee.departmentId)?.name ||
+        employee.department
+        }`
+        : `Godown: ${catalogEntries(orgCatalogs.godowns, {
+          includeArchived: true,
+        }).find((entry) => entry.id === employee.godownId)?.name ||
+        employee.godown
+        }`,
     }));
   }, [
     activeDepartmentId,
@@ -1744,6 +1742,11 @@ function App() {
     if (!currentUser || !isAdmin) {
       throw new Error("Only Admin accounts can import employee records.");
     }
+    if (rows.length > 200) {
+      throw new Error(
+        `Import limit exceeded. You can import a maximum of 200 employees per file. This file contains ${rows.length} employees.`,
+      );
+    }
     let importedCount = 0;
     try {
       for (let offset = 0; offset < rows.length; offset += 500) {
@@ -1760,9 +1763,9 @@ function App() {
               : {}),
             ...(row.departmentId
               ? {
-                  departmentId: row.departmentId,
-                  department: row.department,
-                }
+                departmentId: row.departmentId,
+                department: row.department,
+              }
               : {}),
             status: row.status,
             createdAt: serverTimestamp(),
@@ -1854,7 +1857,7 @@ function App() {
       name,
       role,
       ...(roleEntry &&
-      (roleEntry.active || existingEmployee?.jobRoleId === roleEntry.id)
+        (roleEntry.active || existingEmployee?.jobRoleId === roleEntry.id)
         ? { jobRoleId: roleEntry.id }
         : {}),
       status: data.status,
@@ -1924,10 +1927,7 @@ function App() {
           doc(db, "users", auth.currentUser.uid),
         );
 
-        console.log(
-          "FIRESTORE USER PROFILE:",
-          profileSnap.exists() ? profileSnap.data() : "USER DOCUMENT NOT FOUND",
-        );
+
 
         await addDoc(collection(db, "employees"), {
           ...employeeData,
@@ -1935,6 +1935,7 @@ function App() {
         });
       }
     } catch (error) {
+      console.log("Error saving employee record:", error);
       console.error("Could not save employee record to Firestore.", error);
       if (error.code === "permission-denied") {
         throw new Error(
@@ -1979,16 +1980,16 @@ function App() {
     const employeeIsDepartmentAssigned = Boolean(employee?.departmentId);
     const employeeAssignmentEntry = employeeIsDepartmentAssigned
       ? catalogEntries(orgCatalogs.departments, {
-          includeArchived: true,
-        }).find((entry) => entry.id === employee.departmentId)
+        includeArchived: true,
+      }).find((entry) => entry.id === employee.departmentId)
       : catalogEntries(orgCatalogs.godowns, {
-          includeArchived: true,
-        }).find(
-          (entry) =>
-            entry.id === employee?.godownId ||
-            entry.name === employee?.godown ||
-            (entry.legacyAliases || []).includes(employee?.godown),
-        );
+        includeArchived: true,
+      }).find(
+        (entry) =>
+          entry.id === employee?.godownId ||
+          entry.name === employee?.godown ||
+          (entry.legacyAliases || []).includes(employee?.godown),
+      );
     const employeeRoleEntry =
       findCatalogEntryByName(orgCatalogs.jobRoles, employee?.role) ||
       catalogEntries(orgCatalogs.jobRoles, { includeArchived: true }).find(
@@ -2034,9 +2035,9 @@ function App() {
       matchingRecordConstraints.push(
         currentUser.godownId
           ? or(
-              where("godown", "==", currentUser.godown),
-              where("godownId", "==", currentUser.godownId),
-            )
+            where("godown", "==", currentUser.godown),
+            where("godownId", "==", currentUser.godownId),
+          )
           : where("godown", "==", currentUser.godown),
       );
     }
@@ -2069,20 +2070,20 @@ function App() {
             : {}),
           ...(employeeIsDepartmentAssigned
             ? {
-                departmentId: employee.departmentId,
-                departmentName:
-                  employee.department ||
-                  orgCatalogs.departments[employee.departmentId]?.name ||
-                  "",
-              }
+              departmentId: employee.departmentId,
+              departmentName:
+                employee.department ||
+                orgCatalogs.departments[employee.departmentId]?.name ||
+                "",
+            }
             : {
-                godown: employee.godown,
-                ...(employee.godownId || employeeAssignmentEntry?.id
-                  ? {
-                      godownId: employee.godownId || employeeAssignmentEntry.id,
-                    }
-                  : {}),
-              }),
+              godown: employee.godown,
+              ...(employee.godownId || employeeAssignmentEntry?.id
+                ? {
+                  godownId: employee.godownId || employeeAssignmentEntry.id,
+                }
+                : {}),
+            }),
           date: selectedDate,
           status,
           updatedBy,
@@ -3672,9 +3673,9 @@ function EmployeeProfile({ currentUser, catalogs }) {
       attendanceConstraints.push(
         currentUser.godownId
           ? or(
-              where("godown", "==", currentUser.godown),
-              where("godownId", "==", currentUser.godownId),
-            )
+            where("godown", "==", currentUser.godown),
+            where("godownId", "==", currentUser.godownId),
+          )
           : where("godown", "==", currentUser.godown),
       );
     }
@@ -3708,10 +3709,10 @@ function EmployeeProfile({ currentUser, catalogs }) {
             role: historicalIdentity.role || "Not recorded",
             ...(historicalIdentity.departmentId
               ? {
-                  departmentId: historicalIdentity.departmentId,
-                  department:
-                    historicalIdentity.departmentName || "Not recorded",
-                }
+                departmentId: historicalIdentity.departmentId,
+                department:
+                  historicalIdentity.departmentName || "Not recorded",
+              }
               : { godown: historicalIdentity.godown || "Not recorded" }),
             status: "Deleted employee record",
             createdAt: null,
@@ -4748,8 +4749,8 @@ function Reports({
   const rows = resultsAreStale
     ? []
     : attendance.filter(
-        (a) => a.date >= from && a.date <= to && statuses.includes(a.status),
-      );
+      (a) => a.date >= from && a.date <= to && statuses.includes(a.status),
+    );
   return (
     <>
       <PageHeading
@@ -5079,9 +5080,9 @@ function UserAccountRow({
       ...(nextRole === "Admin"
         ? { godown: null, godownId: null }
         : {
-            godown: account.godown,
-            godownId: account.godownId,
-          }),
+          godown: account.godown,
+          godownId: account.godownId,
+        }),
     });
   };
 
@@ -5491,6 +5492,7 @@ function EmployeeImportModal({ onClose, onGetEmployees, onSave, catalogs }) {
   const [error, setError] = useState("");
   const [result, setResult] = useState(null);
   const previewLimit = 100;
+  const importLimit = 200;
   const { validRows, duplicateCount, validationFailureCount } = useMemo(() => {
     const counts = {
       validRows: [],
@@ -5517,6 +5519,11 @@ function EmployeeImportModal({ onClose, onGetEmployees, onSave, catalogs }) {
       { type: "parse", fileBuffer, existingEmployees, catalogs },
       [fileBuffer],
     );
+    if (rows.length > importLimit) {
+      throw new Error(
+        `Import limit exceeded. You can import a maximum of ${importLimit} employees per file. This file contains ${rows.length} employees.`,
+      );
+    }
     setPreview(rows);
     return rows;
   };
@@ -5824,17 +5831,17 @@ function EmployeeModal({ employee, onClose, onSave, defaultGodown, catalogs }) {
   const [form, setForm] = useState(
     employee
       ? {
-          name: employee.name || "",
-          role: employee.role || "",
-          jobRoleId: employee.jobRoleId || "",
-          status: employee.status || "Active",
-        }
+        name: employee.name || "",
+        role: employee.role || "",
+        jobRoleId: employee.jobRoleId || "",
+        status: employee.status || "Active",
+      }
       : {
-          name: "",
-          role: defaultJobRole?.name || "",
-          jobRoleId: defaultJobRole?.id || "",
-          status: "Active",
-        },
+        name: "",
+        role: defaultJobRole?.name || "",
+        jobRoleId: defaultJobRole?.id || "",
+        status: "Active",
+      },
   );
   const [assignmentType, setAssignmentType] = useState(initialAssignmentType);
   const [assignmentId, setAssignmentId] = useState(initialAssignment?.id || "");
@@ -5910,7 +5917,7 @@ function EmployeeModal({ employee, onClose, onSave, defaultGodown, catalogs }) {
               {[
                 ...activeJobRoles.map((entry) => entry.name),
                 ...(form.role &&
-                !activeJobRoles.some((entry) => entry.name === form.role)
+                  !activeJobRoles.some((entry) => entry.name === form.role)
                   ? [form.role]
                   : []),
               ].map((r) => (
@@ -5926,7 +5933,7 @@ function EmployeeModal({ employee, onClose, onSave, defaultGodown, catalogs }) {
                 const nextType = event.target.value;
                 const nextEntries = catalogEntries(
                   catalogs[
-                    nextType === "department" ? "departments" : "godowns"
+                  nextType === "department" ? "departments" : "godowns"
                   ],
                 );
                 setAssignmentType(nextType);
@@ -6018,10 +6025,10 @@ function formatEmployeeRegistrationDate(value) {
   return Number.isNaN(date.getTime())
     ? "Not available"
     : date.toLocaleDateString("en-GB", {
-        day: "numeric",
-        month: "short",
-        year: "numeric",
-      });
+      day: "numeric",
+      month: "short",
+      year: "numeric",
+    });
 }
 
 function firstDayOfMonth(date) {
@@ -6136,7 +6143,7 @@ function statusClass(s = "") {
 function statusTone(s) {
   return (
     { Present: "green", Absent: "red", Sick: "orange", "On Leave": "purple" }[
-      s
+    s
     ] || "blue"
   );
 }
