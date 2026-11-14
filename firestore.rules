@@ -10,34 +10,50 @@ service cloud.firestore {
       return request.auth != null;
     }
 
-    function userExists() {
-      return signedIn() &&
-        exists(/databases/$(database)/documents/users/$(request.auth.uid));
-    }
-
-    function userProfile() {
-      return get(
-        /databases/$(database)/documents/users/$(request.auth.uid)
-      ).data;
+    function profileCanAccessAll(profile) {
+      return profile.role == "Admin"
+        || (
+          request.auth.uid in protectedSuperAdminUids()
+          && profile.role == "SuperAdmin"
+        );
     }
 
     function activeUser() {
-      return userExists() && userProfile().active == true;
+      let profileExists = signedIn() && exists(
+        /databases/$(database)/documents/users/$(request.auth.uid)
+      );
+      let profile = profileExists
+        ? get(/databases/$(database)/documents/users/$(request.auth.uid)).data
+        : {};
+
+      return profileExists && profile.active == true;
     }
 
     function isSuperAdmin() {
-      return activeUser()
+      let profileExists = signedIn() && exists(
+        /databases/$(database)/documents/users/$(request.auth.uid)
+      );
+      let profile = profileExists
+        ? get(/databases/$(database)/documents/users/$(request.auth.uid)).data
+        : {};
+
+      return profileExists
+        && profile.active == true
         && request.auth.uid in protectedSuperAdminUids()
-        && userProfile().role == "SuperAdmin";
+        && profile.role == "SuperAdmin";
     }
 
     function isAdmin() {
-      return activeUser() &&
-        (isSuperAdmin() || userProfile().role == "Admin");
-    }
+      let profileExists = signedIn() && exists(
+        /databases/$(database)/documents/users/$(request.auth.uid)
+      );
+      let profile = profileExists
+        ? get(/databases/$(database)/documents/users/$(request.auth.uid)).data
+        : {};
 
-    function isStaff() {
-      return activeUser() && userProfile().role == "Staff";
+      return profileExists
+        && profile.active == true
+        && profileCanAccessAll(profile);
     }
 
     function validLegacyGodown(godown) {
@@ -54,27 +70,13 @@ service cloud.firestore {
       ];
     }
 
-    function catalogDocumentExists() {
-      return exists(
-        /databases/$(database)/documents/settings/catalogs
-      );
-    }
-
     function validCatalogId(catalogId) {
       return catalogId is string
         && catalogId.matches("^[a-z0-9][a-z0-9-]{0,63}$");
     }
 
-    function validCatalogEntry(catalogName, catalogId) {
-      let catalogs = get(
-        /databases/$(database)/documents/settings/catalogs
-      ).data.get(catalogName, {});
-      let entry = catalogs is map
-        ? catalogs.get(catalogId, null)
-        : null;
-
-      return validCatalogId(catalogId)
-        && entry is map
+    function validCatalogEntryData(entry) {
+      return entry is map
         && entry.keys().hasAll(["name", "active"])
         && entry.keys().hasOnly(["name", "active", "legacyAliases"])
         && entry.name is string
@@ -90,68 +92,27 @@ service cloud.firestore {
         );
     }
 
-    function catalogEntryExists(catalogName, catalogId) {
-      return catalogDocumentExists()
-        && get(
-          /databases/$(database)/documents/settings/catalogs
-        ).data[catalogName] is map
-        && catalogId in get(
-          /databases/$(database)/documents/settings/catalogs
-        ).data[catalogName]
-        && validCatalogEntry(catalogName, catalogId);
-    }
+    function catalogReferenceValid(
+      catalogName,
+      catalogId,
+      name,
+      requireActive
+    ) {
+      let catalogPath =
+        /databases/$(database)/documents/settings/catalogs;
+      let catalogExists = exists(catalogPath);
+      let catalogData = catalogExists ? get(catalogPath).data : {};
+      let entries = catalogData.get(catalogName, {});
+      let entry = entries is map && validCatalogId(catalogId)
+      ? entries.get(catalogId, {})
+      : {};
 
-    function configuredCatalogId(catalogName, catalogId) {
-      return catalogEntryExists(catalogName, catalogId)
-        && get(
-          /databases/$(database)/documents/settings/catalogs
-        ).data[catalogName][catalogId].active == true;
-    }
-
-    function catalogEntryMatchesName(catalogName, catalogId, name) {
-      return catalogEntryExists(catalogName, catalogId)
-        && name is string
-        && (
-          get(
-            /databases/$(database)/documents/settings/catalogs
-          ).data[catalogName][catalogId].name == name
-          || (
-            get(
-              /databases/$(database)/documents/settings/catalogs
-            ).data[catalogName][catalogId].keys().hasAny(["legacyAliases"])
-            && get(
-              /databases/$(database)/documents/settings/catalogs
-            ).data[catalogName][catalogId].legacyAliases is list
-            && name in get(
-              /databases/$(database)/documents/settings/catalogs
-            ).data[catalogName][catalogId].legacyAliases
-          )
-        );
-    }
-
-    function validActiveCatalogEntry(catalogName, catalogId, name) {
-      let catalogs = get(
-        /databases/$(database)/documents/settings/catalogs
-      ).data.get(catalogName, {});
-      let entry = catalogs is map
-        ? catalogs.get(catalogId, null)
-        : null;
-
-      return validCatalogId(catalogId)
-        && entry is map
-        && entry.keys().hasAll(["name", "active"])
-        && entry.keys().hasOnly(["name", "active", "legacyAliases"])
-        && entry.name is string
-        && entry.name.size() <= 100
-        && entry.name.matches(".*[^[:space:]].*")
-        && entry.active == true
-        && (
-          !entry.keys().hasAny(["legacyAliases"])
-          || (
-            entry.legacyAliases is list
-            && entry.legacyAliases.size() <= 20
-          )
-        )
+      return catalogExists
+        && entries is map
+        && validCatalogId(catalogId)
+        && catalogId in entries
+        && validCatalogEntryData(entry)
+        && (!requireActive || entry.active == true)
         && name is string
         && (
           entry.name == name
@@ -161,6 +122,32 @@ service cloud.firestore {
             && name in entry.legacyAliases
           )
         );
+    }
+
+    function catalogEntryMatchesName(catalogName, catalogId, name) {
+      return catalogReferenceValid(catalogName, catalogId, name, false);
+    }
+
+    function staffCanAccessGodown(profile, godown, godownId) {
+      return profile.role == "Staff"
+        && (
+          profile.keys().hasAny(["godownId"])
+          ? (
+            godownId is string
+            ? profile.godownId == godownId
+            : profile.godown == godown
+              || catalogEntryMatchesName(
+                "godowns",
+                profile.godownId,
+                godown
+              )
+          )
+          : profile.godown == godown
+        );
+    }
+
+    function validActiveCatalogEntry(catalogName, catalogId, name) {
+      return catalogReferenceValid(catalogName, catalogId, name, true);
     }
 
     function validCatalogReference(data, catalogName, fieldName, labelField) {
@@ -176,8 +163,12 @@ service cloud.firestore {
       return data.godown is string
         && data.godown.size() > 0
         && data.keys().hasAny(["godownId"])
-        && configuredCatalogId("godowns", data.godownId)
-        && catalogEntryMatchesName("godowns", data.godownId, data.godown);
+        && catalogReferenceValid(
+          "godowns",
+          data.godownId,
+          data.godown,
+          true
+        );
     }
 
     function validExistingGodownAssignment(data) {
@@ -185,7 +176,12 @@ service cloud.firestore {
         && data.godown.size() > 0
         && (
           data.keys().hasAny(["godownId"])
-          ? catalogEntryMatchesName("godowns", data.godownId, data.godown)
+          ? catalogReferenceValid(
+              "godowns",
+              data.godownId,
+              data.godown,
+              false
+            )
           : validLegacyGodown(data.godown)
         );
     }
@@ -195,7 +191,12 @@ service cloud.firestore {
         && data.role.size() > 0
         && (
           !data.keys().hasAny(["jobRoleId"])
-          || catalogEntryMatchesName("jobRoles", data.jobRoleId, data.role)
+          || catalogReferenceValid(
+            "jobRoles",
+            data.jobRoleId,
+            data.role,
+            false
+          )
         );
     }
 
@@ -206,13 +207,11 @@ service cloud.firestore {
       labelField
     ) {
       return !data.keys().hasAny([fieldName])
-        || (
-          configuredCatalogId(catalogName, data[fieldName])
-          && catalogEntryMatchesName(
-            catalogName,
-            data[fieldName],
-            data[labelField]
-          )
+        || catalogReferenceValid(
+          catalogName,
+          data[fieldName],
+          data[labelField],
+          true
         );
     }
 
@@ -225,17 +224,11 @@ service cloud.firestore {
     ) {
       return existingData.keys().hasAny([fieldName])
         ? data.keys().hasAny([fieldName])
-          && (
-            configuredCatalogId(catalogName, data[fieldName])
-            || (
-              existingData[fieldName] == data[fieldName]
-              && catalogEntryExists(catalogName, data[fieldName])
-            )
-          )
-          && catalogEntryMatchesName(
+          && catalogReferenceValid(
             catalogName,
             data[fieldName],
-            data[labelField]
+            data[labelField],
+            existingData[fieldName] != data[fieldName]
           )
         : validOptionalCatalogId(
             data,
@@ -247,16 +240,16 @@ service cloud.firestore {
 
     function validRetainedGodownAssignment(data, existingData) {
       return data.keys().hasAny(["godownId"])
-          ? validRetainedCatalogId(
-              data,
-              existingData,
-              "godowns",
-              "godownId",
-              "godown"
-            )
-          : existingData.keys().hasAny(["godownId"])
-            ? false
-            : data.godown == existingData.godown;
+        ? validRetainedCatalogId(
+            data,
+            existingData,
+            "godowns",
+            "godownId",
+            "godown"
+          )
+        : existingData.keys().hasAny(["godownId"])
+          ? false
+          : data.godown == existingData.godown;
     }
 
     function validRetainedOptionalCatalogId(
@@ -267,19 +260,13 @@ service cloud.firestore {
       labelField
     ) {
       return !data.keys().hasAny([fieldName])
-        || (
-          catalogEntryMatchesName(
-            catalogName,
-            data[fieldName],
-            data[labelField]
-          )
-          && (
-            configuredCatalogId(catalogName, data[fieldName])
-            || (
-              existingData.keys().hasAny([fieldName])
-              && existingData[fieldName] == data[fieldName]
-              && catalogEntryExists(catalogName, data[fieldName])
-            )
+        || catalogReferenceValid(
+          catalogName,
+          data[fieldName],
+          data[labelField],
+          !(
+            existingData.keys().hasAny([fieldName])
+            && existingData[fieldName] == data[fieldName]
           )
         );
     }
@@ -296,33 +283,21 @@ service cloud.firestore {
         : data.role == "Staff"
           && (
             existingData.keys().hasAny(["godownId"])
-              ? data.keys().hasAny(["godownId"])
-                && (
-                  (
-                    configuredCatalogId("godowns", data.godownId)
-                    && catalogEntryMatchesName(
-                      "godowns",
-                      data.godownId,
-                      data.godown
-                    )
-                  )
-                  || (
-                    existingData.godownId == data.godownId
-                    && catalogEntryMatchesName(
-                      "godowns",
-                      data.godownId,
-                      data.godown
-                    )
-                  )
+            ? validRetainedCatalogId(
+                data,
+                existingData,
+                "godowns",
+                "godownId",
+                "godown"
+              )
+            : data.keys().hasAny(["godownId"])
+              ? validOptionalCatalogId(
+                  data,
+                  "godowns",
+                  "godownId",
+                  "godown"
                 )
-              : data.keys().hasAny(["godownId"])
-                ? configuredCatalogId("godowns", data.godownId)
-                  && catalogEntryMatchesName(
-                    "godowns",
-                    data.godownId,
-                    data.godown
-                  )
-                : data.godown == existingData.godown
+              : data.godown == existingData.godown
           );
     }
 
@@ -343,35 +318,26 @@ service cloud.firestore {
         );
     }
 
-    function canAccessGodown(godown, godownId) {
-      return isAdmin() ||
-        (
-          isStaff()
-          && (
-            userProfile().keys().hasAny(["godownId"])
-            ? (
-              godownId is string
-              ? userProfile().godownId == godownId
-              : userProfile().godown == godown
-                || catalogEntryMatchesName(
-                  "godowns",
-                  userProfile().godownId,
-                  godown
-                )
-            )
-            : userProfile().godown == godown
-          )
-        );
-    }
-
     function canAccessEmployeeAssignment(data) {
-      return isAdmin()
-        || (
-          employeeHasGodownAssignment(data)
-          && !employeeHasDepartmentAssignment(data)
-          && canAccessGodown(
-            data.get("godown", null),
-            data.get("godownId", null)
+      let profileExists = signedIn() && exists(
+        /databases/$(database)/documents/users/$(request.auth.uid)
+      );
+      let profile = profileExists
+        ? get(/databases/$(database)/documents/users/$(request.auth.uid)).data
+        : {};
+
+      return profileExists
+        && profile.active == true
+        && (
+          profileCanAccessAll(profile)
+          || (
+            employeeHasGodownAssignment(data)
+            && !employeeHasDepartmentAssignment(data)
+            && staffCanAccessGodown(
+              profile,
+              data.get("godown", null),
+              data.get("godownId", null)
+            )
           )
         );
     }
@@ -542,40 +508,15 @@ service cloud.firestore {
         );
     }
 
-    function canAccessAttendanceAssignment(data) {
-      return isAdmin()
-        || (
-          isStaff()
-          && attendanceHasGodownAssignment(data)
-          && !attendanceHasDepartmentAssignment(data)
-          && canAccessGodown(
-            data.get("godown", null),
-            data.get("godownId", null)
-          )
-        );
-    }
 
-    function canWriteAttendanceAssignment(data) {
-      return isAdmin()
-        || (
-          isStaff()
-          && attendanceHasGodownAssignment(data)
-          && !attendanceHasDepartmentAssignment(data)
-          && canAccessGodown(
-            data.get("godown", null),
-            data.get("godownId", null)
-          )
-        );
-    }
 
     function attendanceMatchesEmployee(data) {
       let employeePath =
         /databases/$(database)/documents/employees/$(data.employeeId);
-      let employee = exists(employeePath)
-        ? get(employeePath).data
-        : {};
+      let employeeExists = exists(employeePath);
+      let employee = employeeExists ? get(employeePath).data : {};
 
-      return exists(employeePath)
+      return employeeExists
         && employee.status == "Active"
         && employee.name == data.employeeName
         && validEmployeeAssignmentShape(employee)
@@ -658,8 +599,7 @@ service cloud.firestore {
         && validStatus(data.status)
         && data.updatedBy is string
         && data.updatedByUid == request.auth.uid
-        && data.updatedAt == request.time
-        && validCatalogReference(data, "jobRoles", "jobRoleId", "role");
+        && data.updatedAt == request.time;
     }
 
     function creatorUnchanged() {
@@ -673,68 +613,105 @@ service cloud.firestore {
       let auditId = request.resource.data.lastAuditId;
       let auditPath =
         /databases/$(database)/documents/attendanceAudit/$(auditId);
+      let auditIdValid = auditId is string;
+      let auditExists = auditIdValid && exists(auditPath);
+      let auditExistsAfter = auditIdValid && existsAfter(auditPath);
+      let audit = auditExistsAfter ? getAfter(auditPath).data : {};
 
-      return auditId is string
-        && !exists(auditPath)
-        && existsAfter(auditPath)
-        && getAfter(auditPath).data.attendanceId == attendanceId
-        && getAfter(auditPath).data.previousStatus == resource.data.status
-        && getAfter(auditPath).data.newStatus == request.resource.data.status
-        && getAfter(auditPath).data.employeeId == request.resource.data.employeeId
-        && getAfter(auditPath).data.employeeName == request.resource.data.employeeName
-        && getAfter(auditPath).data.get("godown", null)
+      return auditIdValid
+        && !auditExists
+        && auditExistsAfter
+        && audit.attendanceId == attendanceId
+        && audit.previousStatus == resource.data.status
+        && audit.newStatus == request.resource.data.status
+        && audit.employeeId == request.resource.data.employeeId
+        && audit.employeeName == request.resource.data.employeeName
+        && audit.get("godown", null)
           == request.resource.data.get("godown", null)
-        && getAfter(auditPath).data.get("godownId", null)
+        && audit.get("godownId", null)
           == request.resource.data.get("godownId", null)
         && (
-          getAfter(auditPath).data.keys().hasAny(["role"])
-          ? getAfter(auditPath).data.role == request.resource.data.role
+          audit.keys().hasAny(["role"])
+          ? audit.role == request.resource.data.role
           : !request.resource.data.keys().hasAny(["jobRoleId"])
         )
-        && getAfter(auditPath).data.get("jobRoleId", null)
+        && audit.get("jobRoleId", null)
           == request.resource.data.get("jobRoleId", null)
-        && getAfter(auditPath).data.get("departmentId", null)
+        && audit.get("departmentId", null)
           == request.resource.data.get("departmentId", null)
-        && getAfter(auditPath).data.get("departmentName", null)
+        && audit.get("departmentName", null)
           == request.resource.data.get("departmentName", null)
-        && getAfter(auditPath).data.date == request.resource.data.date
-        && getAfter(auditPath).data.changedBy == request.resource.data.updatedBy
-        && getAfter(auditPath).data.changedByUid == request.auth.uid
-        && getAfter(auditPath).data.changedAt == request.time;
+        && audit.date == request.resource.data.date
+        && audit.changedBy == request.resource.data.updatedBy
+        && audit.changedByUid == request.auth.uid
+        && audit.changedAt == request.time;
     }
 
     function auditHasCorrection(auditId) {
       let attendanceId = request.resource.data.attendanceId;
       let attendancePath =
         /databases/$(database)/documents/attendance/$(attendanceId);
+      let attendanceIdValid = attendanceId is string;
+      let attendanceExists = attendanceIdValid && exists(attendancePath);
+      let attendanceExistsAfter = attendanceIdValid && existsAfter(attendancePath);
+      let attendance = attendanceExists
+        ? get(attendancePath).data
+        : {};
+      let attendanceAfter = attendanceExistsAfter
+        ? getAfter(attendancePath).data
+        : {};
 
-      return attendanceId is string
-        && exists(attendancePath)
-        && existsAfter(attendancePath)
-        && get(attendancePath).data.status == request.resource.data.previousStatus
-        && getAfter(attendancePath).data.status == request.resource.data.newStatus
-        && getAfter(attendancePath).data.lastAuditId == auditId
-        && getAfter(attendancePath).data.employeeId == request.resource.data.employeeId
-        && getAfter(attendancePath).data.employeeName == request.resource.data.employeeName
-        && getAfter(attendancePath).data.get("godown", null)
+      return attendanceIdValid
+        && attendanceExists
+        && attendanceExistsAfter
+        && attendance.status == request.resource.data.previousStatus
+        && attendanceAfter.status == request.resource.data.newStatus
+        && attendanceAfter.lastAuditId == auditId
+        && attendanceAfter.employeeId == request.resource.data.employeeId
+        && attendanceAfter.employeeName == request.resource.data.employeeName
+        && attendanceAfter.get("godown", null)
           == request.resource.data.get("godown", null)
-        && getAfter(attendancePath).data.get("godownId", null)
+        && attendanceAfter.get("godownId", null)
           == request.resource.data.get("godownId", null)
         && (
           request.resource.data.keys().hasAny(["role"])
-          ? getAfter(attendancePath).data.role == request.resource.data.role
-          : !getAfter(attendancePath).data.keys().hasAny(["jobRoleId"])
+          ? attendanceAfter.role == request.resource.data.role
+          : !attendanceAfter.keys().hasAny(["jobRoleId"])
         )
-        && getAfter(attendancePath).data.get("jobRoleId", null)
+        && attendanceAfter.get("jobRoleId", null)
           == request.resource.data.get("jobRoleId", null)
-        && getAfter(attendancePath).data.get("departmentId", null)
+        && attendanceAfter.get("departmentId", null)
           == request.resource.data.get("departmentId", null)
-        && getAfter(attendancePath).data.get("departmentName", null)
+        && attendanceAfter.get("departmentName", null)
           == request.resource.data.get("departmentName", null)
-        && getAfter(attendancePath).data.date == request.resource.data.date
-        && getAfter(attendancePath).data.updatedBy == request.resource.data.changedBy
-        && getAfter(attendancePath).data.updatedByUid == request.auth.uid
-        && getAfter(attendancePath).data.updatedAt == request.time;
+        && attendanceAfter.date == request.resource.data.date
+        && attendanceAfter.updatedBy == request.resource.data.changedBy
+        && attendanceAfter.updatedByUid == request.auth.uid
+        && attendanceAfter.updatedAt == request.time;
+    }
+
+    function canUseAttendanceAssignment(data) {
+      let profileExists = signedIn() && exists(
+        /databases/$(database)/documents/users/$(request.auth.uid)
+      );
+      let profile = profileExists
+        ? get(/databases/$(database)/documents/users/$(request.auth.uid)).data
+        : {};
+
+      return profileExists
+        && profile.active == true
+        && (
+          profileCanAccessAll(profile)
+          || (
+            attendanceHasGodownAssignment(data)
+            && !attendanceHasDepartmentAssignment(data)
+            && staffCanAccessGodown(
+              profile,
+              data.get("godown", null),
+              data.get("godownId", null)
+            )
+          )
+        );
     }
 
     match /settings/{settingId} {
@@ -828,8 +805,7 @@ service cloud.firestore {
     }
 
     match /employees/{employeeId} {
-      allow read: if activeUser() &&
-        canAccessEmployeeAssignment(resource.data);
+      allow read: if canAccessEmployeeAssignment(resource.data);
 
       allow create: if isAdmin() &&
         validEmployeeBase(request.resource.data)
@@ -855,8 +831,7 @@ service cloud.firestore {
     }
 
     match /attendance/{attendanceId} {
-      allow get, list: if activeUser() &&
-        canAccessAttendanceAssignment(resource.data);
+      allow get, list: if canUseAttendanceAssignment(resource.data);
 
       allow create: if signedIn()
         && request.resource.data.keys().hasOnly([
@@ -878,7 +853,7 @@ service cloud.firestore {
         && hasAttendanceFields(request.resource.data)
         && request.resource.data.keys().hasAll(["createdByUid"])
         && request.resource.data.createdByUid == request.auth.uid
-        && canWriteAttendanceAssignment(request.resource.data)
+        && canUseAttendanceAssignment(request.resource.data)
         && attendanceMatchesEmployee(request.resource.data);
 
       allow update: if signedIn()
@@ -904,15 +879,14 @@ service cloud.firestore {
           resource.data
         )
         && creatorUnchanged()
-        && canWriteAttendanceAssignment(resource.data)
+        && canUseAttendanceAssignment(resource.data)
         && correctionHasAudit(attendanceId);
 
       allow delete: if false;
     }
 
     match /attendanceAudit/{auditId} {
-      allow get, list: if activeUser() &&
-        canAccessAttendanceAssignment(resource.data);
+      allow get, list: if canUseAttendanceAssignment(resource.data);
 
       allow create: if signedIn()
         && request.resource.data.keys().hasOnly([
@@ -966,7 +940,7 @@ service cloud.firestore {
             )
           )
         )
-        && canWriteAttendanceAssignment(request.resource.data)
+        && canUseAttendanceAssignment(request.resource.data)
         && auditHasCorrection(auditId);
 
       allow update, delete: if false;

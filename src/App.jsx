@@ -65,7 +65,7 @@ import {
   signOut as firebaseSignOut,
 } from "firebase/auth";
 import {
-  addDoc,
+  addDoc, and,
   collection,
   deleteField,
   deleteDoc,
@@ -2161,12 +2161,17 @@ function App() {
     const recordId = attendanceDocumentId(normalizedEmployeeId, selectedDate);
     const recordRef = doc(db, "attendance", recordId);
     const auditRef = doc(collection(db, "attendanceAudit"));
-    const matchingRecordConstraints = [
+
+
+
+
+    const matchingRecordFilters = [
       where("employeeId", "==", normalizedEmployeeId),
       where("date", "==", selectedDate),
     ];
+
     if (!isAdmin) {
-      matchingRecordConstraints.push(
+      matchingRecordFilters.push(
         currentUser.godownId
           ? or(
             where("godown", "==", currentUser.godown),
@@ -2175,11 +2180,21 @@ function App() {
           : where("godown", "==", currentUser.godown),
       );
     }
+
     const matchingRecordsQuery = query(
       collection(db, "attendance"),
-      ...matchingRecordConstraints,
+      and(...matchingRecordFilters),
       limit(2),
     );
+
+
+
+
+
+
+
+
+
     const updatedBy = currentUser.name || currentUser.email;
 
     setAttendanceSaving(true);
